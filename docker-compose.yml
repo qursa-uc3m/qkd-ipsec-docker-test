@@ -1,0 +1,53 @@
+services:
+  strongswan-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: strongswan-base:latest
+  bob:
+    image: strongswan-base:latest
+    container_name: bob
+    depends_on:
+      - strongswan-base
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./bob:/etc/swanctl
+      - ./strongswan.conf:/etc/strongswan.conf
+    networks:
+      internet:
+        ipv4_address: 192.168.0.2
+      intranet:
+        ipv4_address: 10.1.0.2
+  alice:
+    image: strongswan-base:latest
+    container_name: alice
+    depends_on:
+      - strongswan-base
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./alice:/etc/swanctl
+      - ./strongswan.conf:/etc/strongswan.conf
+    networks:
+      internet:
+        ipv4_address: 192.168.0.3
+networks:
+  internet:
+    ipam:
+      driver: default 
+      config:
+        - subnet: 192.168.0.0/24
+  intranet:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.1.0.0/16
