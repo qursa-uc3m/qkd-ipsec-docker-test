@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y \
     bison \
     python3 \
     gperf \
+    libcurl4-openssl-dev \
+    libjansson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/build_strongswan.sh /build_strongswan.sh

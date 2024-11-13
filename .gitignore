@@ -1,7 +1,4 @@
-# Certificates and keys
-/alice/pkcs8/*
-/alice/x509/*
-/alice/x509ca/*
-/bob/pkcs8/*
-/bob/x509/*
-/bob/x509ca/*
+**/qkd/
+**/pkcs8/
+**/x509/
+**/x509ca/

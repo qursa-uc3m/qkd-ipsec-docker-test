@@ -6,7 +6,7 @@ CLONE_REPO=true
 
 # Repository information
 REPO_URL="https://github.com/qursa-uc3m/strongswan.git"
-BRANCH="qkd"
+BRANCH="qkd-nodes"
 WORK_DIR="/strongswan"
 
 echo "Starting strongSwan build process..."
