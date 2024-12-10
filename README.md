@@ -4,6 +4,36 @@ This repository contains a testing environment for our QKD-enabled strongSwan [f
 
 The testing environment is derived from the [strongX509/docker](https://github.com/strongX509/docker) project and modified to support our QKD integration testing.
 
+## Setting the QKD Plugin
+
+The [qursa-uc3m/strongswan](https://github.com/qursa-uc3m/strongswan/tree/qkd) strongSwan fork includes two plugins:
+
+- **QKD-KEM Plugin**: Hybridizes QKD with Post-Quantum Cryptography using the [QKD-KEM Provider](https://github.com/qursa-uc3m/qkd-kem-provider), which depends on the [QKD-ETSI API](https://github.com/qursa-uc3m/qkd-etsi-api).
+- **QKD Plugin**: Implements bare QKD integration.
+
+To test a specific plugin:
+
+1. Set the `BUILD_QKD_KEM` variable in `docker-compose.yml`:
+
+   - `"true"` - Builds QKD-KEM plugin with required dependencies (qkd-etsi-api and qkd-kem-provider)
+   - `"false"` - Builds only the basic QKD plugin
+
+2. Enable the corresponding plugin in `scripts/build_strongswan.sh`:
+
+   - For QKD plugin: `--enable-qkd`
+   - For QKD-KEM plugin: `--enable-qkd-kem`
+
+3. Copy the plugin-specific configuration files:
+
+```bash
+# From config/<plugin_name>/ to:
+alice/           # Client configuration
+bob/            # Server configuration
+strongswan.conf  # Main strongSwan configuration
+```
+
+*Note*: The provided configuration for the QKD-KEM plugin tests the hybridization of QKD with Kyber768.
+
 ## Setup
 
 Generate certificates (run outside Docker):

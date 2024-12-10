@@ -3,7 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILD_QKD_KEM: "true"
     image: strongswan-base:latest
+    container_name: strongswan-base
   bob:
     image: strongswan-base:latest
     container_name: bob

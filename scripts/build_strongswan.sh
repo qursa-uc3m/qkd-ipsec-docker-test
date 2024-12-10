@@ -1,21 +1,9 @@
 #!/bin/bash
 set -e
 
-# Boolean flag to control whether to clone the repository
-CLONE_REPO=true
-
-# Repository information
-REPO_URL="https://github.com/qursa-uc3m/strongswan.git"
-BRANCH="qkd"
 WORK_DIR="/strongswan"
 
 echo "Starting strongSwan build process..."
-
-if [ "$CLONE_REPO" = true ]; then
-    echo "Cloning strongSwan repository..."
-    rm -rf "$WORK_DIR"
-    git clone -b "$BRANCH" "$REPO_URL" "$WORK_DIR"
-fi
 
 cd "$WORK_DIR"
 
@@ -53,7 +41,7 @@ echo "Configuring the build..."
     --enable-eap-tls \
     --enable-updown \
     --enable-vici \
-    --enable-qkd \
+    --enable-qkd-kem \
     --enable-silent-rules
 
 echo "Building strongSwan..."

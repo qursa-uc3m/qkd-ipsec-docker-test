@@ -1,0 +1,19 @@
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+qkdkemprovider = qkdkem_sect
+default = default_sect
+# fips = fips_sect
+
+[default_sect]
+activate = 1
+
+#[fips_sect]
+#activate = 1
+
+[qkdkem_sect]
+module = /usr/local/lib/ossl-modules/qkdkemprovider.so
+activate = 1
