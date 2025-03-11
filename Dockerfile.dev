@@ -1,0 +1,104 @@
+# Base image 
+FROM ubuntu:22.04
+
+# Build argument for QKD support
+ARG BUILD_QKD_ETSI=true
+ARG BUILD_QKD_KEM=false
+ARG QKD_BACKEND=simulated
+ARG ACCOUNT_ID=
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV OPENSSL_CONF=/etc/ssl/qkd-kem-openssl.cnf
+ENV OPENSSL_MODULES=/usr/local/lib/ossl-modules
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/ossl-modules
+# Pass build args to env vars
+ENV QKD_BACKEND=${QKD_BACKEND}
+ENV ACCOUNT_ID=${ACCOUNT_ID}
+
+# Install build dependencies and testing tools
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    iputils-ping \
+    nano \
+    wget \
+    bzip2 \
+    make \
+    gcc \
+    libssl-dev \
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+    git \
+    gettext \
+    libgmp-dev \
+    build-essential \
+    cmake \
+    ninja-build \
+    flex \
+    bison \
+    python3 \
+    gperf \
+    uuid-dev \
+    net-tools \
+    iptables \
+    tcpdump \
+    curl \
+    libcurl4-openssl-dev \
+    libjansson-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY config/openssl.cnf /etc/ssl/qkd-kem-openssl.cnf
+
+# Create directory for QKD certificates
+RUN mkdir -p /qkd_certs
+
+# Copy QKD certificates
+# Using a multi-stage build to conditionally copy
+COPY qkd_certs /qkd_certs
+
+# Clone and build QKD ETSI API if requested
+RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
+    git clone https://github.com/qursa-uc3m/qkd-etsi-api.git /qkd-etsi-api; \
+    fi
+
+# Copy build and environment scripts
+COPY scripts/build_*.sh /
+COPY scripts/set_env.sh /
+RUN chmod +x /build_*.sh /set_env.sh
+
+# Build QKD ETSI API
+RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
+    /build_qkd_etsi.sh; \
+    fi
+
+# Build QKD KEM provider if requested
+RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
+    git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+    /build_qkd_kem_provider.sh; \
+    fi
+
+# Create strongSwan directory
+WORKDIR /strongswan
+
+# Add set_env.sh to bash profile so it runs on login
+RUN echo '. /set_env.sh' >> /root/.bashrc
+
+# Create entrypoint script to always set environment variables
+RUN echo '#!/bin/bash' > /entrypoint.sh && \
+    echo 'source /set_env.sh' >> /entrypoint.sh && \
+    echo 'exec "$@"' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+# Create symlinks and directories
+RUN mkdir -p /etc/swanctl/x509 /etc/swanctl/conf.d
+
+# Expose ports
+EXPOSE 500/udp 4500/udp
+
+# Set the entrypoint to run set_env.sh before any command
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command
+CMD ["tail", "-f", "/dev/null"]

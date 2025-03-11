@@ -54,6 +54,10 @@ Build and launch containers:
 docker-compose build --no-cache && docker-compose up
 ```
 
+```bash
+QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.dev.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.dev.yml up
+```
+
 ## Running Tests
 
 Start Bob (server):

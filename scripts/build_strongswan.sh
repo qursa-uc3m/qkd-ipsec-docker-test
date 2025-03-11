@@ -41,7 +41,7 @@ echo "Configuring the build..."
     --enable-eap-tls \
     --enable-updown \
     --enable-vici \
-    --enable-qkd-kem \
+    --enable-qkd \
     --enable-silent-rules
 
 echo "Building strongSwan..."
