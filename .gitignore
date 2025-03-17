@@ -5,3 +5,7 @@
 /bob/pkcs8/*
 /bob/x509/*
 /bob/x509ca/*
+/qkd_certs/*
+*.pem
+*.crt 
+*.key
