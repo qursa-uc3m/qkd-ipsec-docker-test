@@ -64,6 +64,7 @@ Start Bob (server):
 
 ```bash
 docker exec -ti bob /bin/bash
+source /set_env.sh
 ./charon
 ```
 
@@ -71,6 +72,7 @@ Start Alice (client):
 
 ```bash
 docker exec -ti alice /bin/bash
+source /set_env.sh
 ./charon
 ```
 
@@ -78,6 +80,7 @@ Initiate test connection:
 
 ```bash
 docker exec -ti alice /bin/bash
+source /set_env.sh
 swanctl --initiate --child net
 ```
 

@@ -42,7 +42,8 @@ echo "Configuring the build..."
     --enable-updown \
     --enable-vici \
     --enable-qkd \
-    --enable-silent-rules
+    --enable-silent-rules \
+    LDFLAGS="-luuid"
 
 echo "Building strongSwan..."
 make -j$(nproc)
