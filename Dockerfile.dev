@@ -60,7 +60,7 @@ COPY qkd_certs /qkd_certs
 
 # Clone and build QKD ETSI API if requested
 RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-etsi-api.git /qkd-etsi-api; \
+    git clone https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper.git /qkd-etsi-api-c-wrapper; \
     fi
 
 # Copy build and environment scripts
@@ -79,26 +79,17 @@ RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
     /build_qkd_kem_provider.sh; \
     fi
 
-# Create strongSwan directory
+# Create strongSwan directory and copy local source
 WORKDIR /strongswan
+COPY ./strongswan/ .
 
-# Add set_env.sh to bash profile so it runs on login
-RUN echo '. /set_env.sh' >> /root/.bashrc
+# Build strongSwan from local directory
+RUN /build_strongswan.sh
 
-# Create entrypoint script to always set environment variables
-RUN echo '#!/bin/bash' > /entrypoint.sh && \
-    echo 'source /set_env.sh' >> /entrypoint.sh && \
-    echo 'exec "$@"' >> /entrypoint.sh && \
-    chmod +x /entrypoint.sh
-
-# Create symlinks and directories
-RUN mkdir -p /etc/swanctl/x509 /etc/swanctl/conf.d
+# Create symlink for charon daemon
+RUN ln -s /usr/libexec/ipsec/charon /charon
 
 # Expose ports
+# 500: IKE
+# 4500: NAT-T
 EXPOSE 500/udp 4500/udp
-
-# Set the entrypoint to run set_env.sh before any command
-ENTRYPOINT ["/entrypoint.sh"]
-
-# Default command
-CMD ["tail", "-f", "/dev/null"]

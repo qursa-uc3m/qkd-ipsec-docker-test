@@ -38,13 +38,17 @@ RUN apt-get update && apt-get install -y \
     bison \
     python3 \
     gperf \
+    uuid-dev \
+    curl \
+    libcurl4-openssl-dev \
+    libjansson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY config/openssl.cnf /etc/ssl/qkd-kem-openssl.cnf
 
 # Clone repositories
 RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-etsi-api.git /qkd-etsi-api; \
+    git clone https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper.git /qkd-etsi-api-c-wrapper; \
     fi
 
 RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
