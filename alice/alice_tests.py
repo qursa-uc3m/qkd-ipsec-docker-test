@@ -17,12 +17,14 @@ config_file = "/etc/swanctl/swanctl.conf"
 
 proposals = [
     "aes128-sha256-x25519",
-    "aes128-sha256-x448"
+    "aes128-sha256-x448",
+    "aes128-sha256-qkd"
 ]
 
 esp_proposals = [
     "aes128-sha256-x25519",
-    "aes128-sha256-x448"
+    "aes128-sha256-x448",
+    "aes128-sha256-qkd"
 ]
 
 # Ensure output directory exists
