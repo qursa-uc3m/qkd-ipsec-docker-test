@@ -1,0 +1,14 @@
+FROM strongswan-base:latest
+
+# Install Python and required packages
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    tshark \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install required Python packages
+RUN pip3 install pandas
+
+# Create directory for output
+RUN mkdir -p /output

@@ -8,4 +8,13 @@
 /qkd_certs/*
 *.pem
 *.crt 
-*.key
+*.keyç
+
+# venv
+.test-venv
+.test-venv/*
+/.pytest_cache/*
+
+# data
+results/*
+analysis/*
