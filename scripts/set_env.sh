@@ -31,6 +31,35 @@ if [ "${QKD_BACKEND}" = "qukaydee" ]; then
         echo "QKD_MASTER_SAE=$QKD_MASTER_SAE"
         echo "QKD_SLAVE_SAE=$QKD_SLAVE_SAE"
     fi
+elif [ "${QKD_BACKEND}" = "cerberis-xgr" ]; then
+    echo "Setting up Cerberis-XGR environment:"
+    
+    # Certificate configuration
+    export QKD_MASTER_CA_CERT_PATH="${PROJECT_DIR}/qkd_certs/ChrisCA.pem"
+    export QKD_SLAVE_CA_CERT_PATH="${PROJECT_DIR}/qkd_certs/ChrisCA.pem"
+
+    export QKD_MASTER_CERT_PATH="${PROJECT_DIR}/qkd_certs/ETSIA.pem"
+    export QKD_MASTER_KEY_PATH="${PROJECT_DIR}/qkd_certs/ETSIA-key.pem"
+
+    export QKD_SLAVE_CERT_PATH="${PROJECT_DIR}/qkd_certs/ETSIB.pem"
+    export QKD_SLAVE_KEY_PATH="${PROJECT_DIR}/qkd_certs/ETSIB-key.pem"
+    
+    # QuKayDee configuration
+    
+    export QKD_MASTER_KME_HOSTNAME="https://castor.det.uvigo.es:444"
+    export QKD_SLAVE_KME_HOSTNAME="https://castor.det.uvigo.es:442"
+    export QKD_MASTER_SAE="CONSA"
+    export QKD_SLAVE_SAE="CONSB"
+        
+    echo "QKD_MASTER_KME_HOSTNAME=$QKD_MASTER_KME_HOSTNAME"
+    echo "QKD_SLAVE_KME_HOSTNAME=$QKD_SLAVE_KME_HOSTNAME"
+    echo "QKD_MASTER_CA_CERT_PATH=$QKD_MASTER_CA_CERT_PATH"
+    echo "QKD_SLAVE_CA_CERT_PATH=$QKD_SLAVE_CA_CERT_PATH"
+    echo "QKD_MASTER_CERT_PATH=$QKD_MASTER_CERT_PATH"
+    echo "QKD_MASTER_KEY_PATH=$QKD_MASTER_KEY_PATH"
+    echo "QKD_SLAVE_CERT_PATH=$QKD_SLAVE_CERT_PATH"
+    echo "QKD_SLAVE_KEY_PATH=$QKD_SLAVE_KEY_PATH"
+    echo ""
 else
     echo "Using default QKD backend (simulated)"
     # Set default environment variables for simulated mode
