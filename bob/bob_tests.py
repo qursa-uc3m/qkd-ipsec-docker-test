@@ -19,12 +19,16 @@ config_file = "/etc/swanctl/swanctl.conf"
 proposals = [
     "aes128-sha256-x25519",
     "aes128-sha256-x448",
+    "aes128-sha256-kyber1",
+    "aes128-sha256-hqc1",
     "aes128-sha256-qkd"
 ]
 
 esp_proposals = [
     "aes128-sha256-x25519",
     "aes128-sha256-x448",
+    "aes128-sha256-kyber1",
+    "aes128-sha256-hqc1",
     "aes128-sha256-qkd"
 ]
 
@@ -66,6 +70,15 @@ while not connected and retries < max_retries:
 if not connected:
     print("Failed to connect after maximum retries. Exiting.")
     exit(1)
+    
+# Receive number of iterations from Alice
+try:
+    iterations_str = client_socket.recv(1024).decode()
+    NUM_ITERATIONS = int(iterations_str)
+    print(f"Received number of iterations from Alice: {NUM_ITERATIONS}")
+except (ValueError, TypeError) as e:
+    print(f"Error parsing iterations, using default: {e}")
+    NUM_ITERATIONS = 3
 
 with open(config_file, "r") as file:
     config_data = file.read()
@@ -88,9 +101,9 @@ with open(f"{OUTPUT_DIR}/bob_log.txt", "w") as log_file:
         print("Configuration file updated.")
         log_file.write("Configuration file updated.\n")
 
-        for i in range(1, 4):
-            print(f"Iteration {i}")
-            log_file.write(f"Iteration {i}\n")
+        for i in range(1, NUM_ITERATIONS + 1):
+            print(f"Iteration {i}/{NUM_ITERATIONS}")
+            log_file.write(f"Iteration {i}/{NUM_ITERATIONS}\n")
 
             print("Executing strongSwan...")
             log_file.write("Executing strongSwan...\n")

@@ -5,10 +5,42 @@ import matplotlib.pyplot as plt
 import sys
 import os
 
+from matplotlib import rcParams
+
+# Set up consistent matplotlib styling
+def setup_matplotlib_styling():
+    """Configure matplotlib with consistent styling and LaTeX support for all plots"""
+    # Enable LaTeX rendering
+    rcParams['text.usetex'] = True
+    rcParams['text.latex.preamble'] = r'\usepackage{amsmath} \usepackage{amssymb} \usepackage{amsfonts}'
+    
+    # Font configuration
+    rcParams['font.family'] = 'serif'
+    rcParams['font.serif'] = ['Computer Modern Roman']
+    rcParams['font.size'] = 14
+    rcParams['axes.titlesize'] = 16
+    rcParams['axes.labelsize'] = 14
+    rcParams['xtick.labelsize'] = 12
+    rcParams['ytick.labelsize'] = 12
+    rcParams['legend.fontsize'] = 12
+    rcParams['figure.titlesize'] = 18
+    
+    # Figure settings
+    rcParams['figure.figsize'] = (10, 6)
+    rcParams['savefig.dpi'] = 300
+    rcParams['savefig.bbox'] = 'tight'
+    rcParams['savefig.format'] = 'pdf' 
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+
 def analyze_results(csv_file):
     """
     Analyze the test results and generate visualizations
     """
+    
+    # Set up matplotlib styling
+    setup_matplotlib_styling()
+    
     # Check if file exists
     if not os.path.exists(csv_file):
         print(f"Error: Results file {csv_file} not found")
@@ -46,7 +78,7 @@ def analyze_results(csv_file):
     plt.ylabel("Latency (seconds)")
     plt.xlabel("Proposal")
     plt.tight_layout()
-    plt.savefig("analysis/avg_latency.png")
+    plt.savefig("analysis/avg_latency.pdf")
     
     # 2. Box plot for distribution
     plt.figure(figsize=(12, 6))
@@ -55,7 +87,7 @@ def analyze_results(csv_file):
     plt.ylabel("Latency (seconds)")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig("analysis/latency_distribution.png")
+    plt.savefig("analysis/latency_distribution.pdf")
     
     # Generate report
     with open("analysis/analysis_report.txt", "w") as f:
@@ -78,10 +110,9 @@ def analyze_results(csv_file):
         f.write(f"Standard deviation: {stats.loc['Std Dev', most_consistent]:.6f} seconds\n\n")
         
         f.write("Generated visualizations:\n")
-        f.write("1. analysis/avg_latency.png - Average latencies across proposals\n")
-        f.write("2. analysis/latency_distribution.png - Distribution of latencies\n")
-    
-    print("Analysis complete! Results saved to analysis/")
+        f.write("1. analysis/avg_latency.* - Average latencies across proposals\n")
+        f.write("2. analysis/latency_distribution.* - Distribution of latencies\n")
+        f.write("3. analysis/statistics.csv - Detailed statistics\n")
     return True
 
 if __name__ == "__main__":

@@ -7,23 +7,34 @@ import re
 import pandas as pd
 import os
 import sys
+import argparse
+
+parser = argparse.ArgumentParser(description='QKD-IPSec Testing Script (Alice)')
+parser.add_argument('--iterations', type=int, default=3, 
+                    help='Number of test iterations to run (default: 10)')
+args = parser.parse_args()
 
 # Use environment variables or default values
 HOST = "0.0.0.0"  
 PORT = 12345
 OUTPUT_DIR = "/output"
+NUM_ITERATIONS = args.iterations
 
 config_file = "/etc/swanctl/swanctl.conf"
 
 proposals = [
     "aes128-sha256-x25519",
     "aes128-sha256-x448",
+    "aes128-sha256-kyber1",
+    "aes128-sha256-hqc1",
     "aes128-sha256-qkd"
 ]
 
 esp_proposals = [
     "aes128-sha256-x25519",
     "aes128-sha256-x448",
+    "aes128-sha256-kyber1",
+    "aes128-sha256-hqc1",
     "aes128-sha256-qkd"
 ]
 
@@ -59,6 +70,10 @@ print(f"Wait for Bob to connect to port {PORT}...")
 conn, addr = server_socket.accept()
 print(f"Bob is connected with {addr}")
 
+print(f"Sending number of iterations ({NUM_ITERATIONS}) to Bob...")
+conn.send(str(NUM_ITERATIONS).encode())
+time.sleep(0.5)
+
 # Read the configuration file
 with open(config_file, "r") as file:
     config_data = file.read()
@@ -83,8 +98,8 @@ for prop, esp_prop in zip(proposals, esp_proposals):
     tshark_proc = run_cmd(f"tshark -w {ts_res}", start_new_session=True)
     print("Capturing traffic with tshark...")
 
-    for i in range(1, 4):
-        print(f"Iteration {i}")
+    for i in range(1, NUM_ITERATIONS + 1):
+        print(f"Iteration {i}/{NUM_ITERATIONS}")
         print("Waiting for Bob to execute 'charon'...")
         data = conn.recv(1024).decode()
         
