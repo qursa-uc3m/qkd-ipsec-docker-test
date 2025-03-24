@@ -75,8 +75,10 @@ RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
 
 # Build QKD KEM provider if requested
 RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
-    /build_qkd_kem_provider.sh; \
+        git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+        /build_qkd_kem_provider.sh; \
+    else \
+        /build_liboqs.sh; \
     fi
 
 # Create strongSwan directory and copy local source

@@ -26,6 +26,7 @@ echo "Configuring the build..."
     --enable-nonce \
     --enable-random \
     --enable-openssl \
+    --enable-oqs \
     --enable-pem \
     --enable-x509 \
     --enable-pubkey \
