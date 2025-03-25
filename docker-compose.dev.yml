@@ -67,20 +67,3 @@ networks:
       driver: default
       config:
         - subnet: 172.31.0.0/16  # Changed from 10.1.0.0/16
-        
-# Alternative
-#networks:
-#  internet:
-#    driver: macvlan
-#    driver_opts:
-#      parent: enp1s0  # Put your interface here
-#    ipam:
-#      config:
-#        - subnet: 192.168.0.0/24
-#  intranet:
-#    driver: macvlan
-#    driver_opts:
-#      parent: enp1s0  # Put your interface here
-#    ipam:
-#      config:
-#        - subnet: 10.1.0.0/16

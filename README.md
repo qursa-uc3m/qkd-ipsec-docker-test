@@ -64,6 +64,7 @@ Start Bob (server):
 
 ```bash
 docker exec -ti bob /bin/bash
+export IS_TLS_SERVER=1
 source /set_env.sh
 ./charon
 ```
