@@ -1,5 +1,7 @@
 # QKD-IPSec Docker Testing Environment
 
+> **IMPORTANT NOTE:** The [qursa-uc3m strongSwan](https://github.com/qursa-uc3m/strongswan) repository (https://github.com/qursa-uc3m/strongswan) is temporarily unavailable. Since this repository is required during the Docker build process, the environment cannot be built until the repository is restored. We expect it to be available again soon. Please check back later.
+
 This repository contains a testing environment for our QKD-enabled strongSwan [fork](https://github.com/qursa-uc3m/strongswan/tree/qkd) which integrates Quantum Key Distribution into (in substitution of the) the IKEv2 protocol. The setup uses Docker containers to simulate a client-server (Alice-Bob) environment for testing secure communication channels.
 
 The testing environment is derived from the [strongX509/docker](https://github.com/strongX509/docker) project and modified to support our QKD integration testing.
