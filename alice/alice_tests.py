@@ -157,7 +157,7 @@ def reset_timing_log(log_file_path, log_message):
         log_message(f"Error initializing timing log: {e}")
         return False
 
-def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message):
+def process_plugin_timing_data(plugin_timing_log, prop, log_message):
     """
     Process plugin timing data from temporary file for each proposal
     
@@ -179,6 +179,7 @@ def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message)
             "proposal": prop,
             "algorithms_count": 0,
             "total_time_ms": 0,
+            "total_time_plugin_ms": 0,
             "avg_time_ms": 0,
             "min_time_ms": 0,
             "max_time_ms": 0
@@ -199,6 +200,7 @@ def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message)
                 "proposal": prop,
                 "algorithms_count": 0,
                 "total_time_ms": 0,
+                "total_time_plugin_ms": 0,
                 "avg_time_ms": 0,
                 "min_time_ms": 0,
                 "max_time_ms": 0
@@ -223,12 +225,24 @@ def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message)
         
         # Calculate statistics
         total_time_ms = timing_df['time_diff_ms'].sum()
+
+        # Calculate total plugin time (from first creation to last destruction)
+        if algo_count > 0:
+            # Find the earliest creation timestamp and the latest destruction timestamp
+            first_create = timing_df['create_timestamp'].min() * 1000 + timing_df['create_microseconds'].loc[timing_df['create_timestamp'].idxmin()] / 1000
+            last_destroy = timing_df['destroy_timestamp'].max() * 1000 + timing_df['destroy_microseconds'].loc[timing_df['destroy_timestamp'].idxmax()] / 1000
+            
+            # Calculate the total elapsed time
+            total_time_plugin_ms = last_destroy - first_create
+        else:
+            total_time_plugin_ms = 0
                 
         # Return the statistics
         return {
             "proposal": prop,
             "algorithms_count": algo_count,
-            "total_time_ms": total_time_ms
+            "total_time_ms": total_time_ms,
+            "total_time_plugin_ms": total_time_plugin_ms
         }
         
     except Exception as e:
@@ -237,6 +251,7 @@ def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message)
             "proposal": prop,
             "algorithms_count": 0,
             "total_time_ms": 0,
+            "total_time_plugin_ms": 0,
             "avg_time_ms": 0,
             "min_time_ms": 0,
             "max_time_ms": 0
@@ -271,10 +286,12 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
     if not is_consistent:
         log_message(f"Warning: Inconsistent algorithm counts across iterations for {prop}: {algorithm_counts}")
     
+    # Total time inside plugins
     total_time_ms = sum(iter_data["total_time_ms"] for iter_data in proposal_iterations)
-    
-    # Calculate averages
     avg_time_per_iter_ms = total_time_ms / num_iterations if num_iterations > 0 else 0
+    # Total time between first creation and last destruction
+    total_time_plugin_ms = sum(iter_data["total_time_plugin_ms"] for iter_data in proposal_iterations)
+    avg_time_plugin_ms = total_time_plugin_ms / total_algorithms if total_algorithms > 0 else 0
     
     # Create and return summary dictionary
     return {
@@ -282,7 +299,9 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
         "iterations": num_iterations,
         "total_algorithms": total_algorithms,
         "total_time_ms": total_time_ms,
-        "avg_time_per_iter_ms": avg_time_per_iter_ms
+        "total_time_plugin_ms": total_time_plugin_ms,
+        "avg_time_per_iter_ms": avg_time_per_iter_ms,
+        "avg_time_plugin_ms": avg_time_plugin_ms
     }
 
 def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_timing, log_message):
@@ -315,28 +334,41 @@ def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_
                 report_file.write(f"Min Latency: {min_latency}\n")
                 report_file.write(f"Max Latency: {max_latency}\n")
                 
-            # Add plugin timing data - this is the only new part
+            # Add plugin timing data
             plugin_data = df_plugin_timing[df_plugin_timing['proposal'] == prop] if not df_plugin_timing.empty else pd.DataFrame()
             
             if not plugin_data.empty:
                 row = plugin_data.iloc[0]
                 
-                # Check if each column exists before trying to access it
-                required_cols = ['algorithms_count', 'total_time_ms', 'avg_time_ms']
-                missing_cols = [col for col in required_cols if col not in row.index]
+                # Check which columns exist before trying to access them
+                available_cols = row.index.tolist()
                 
-                if not missing_cols:
-                    report_file.write(f"Plugin Operations Count: {row['algorithms_count']}\n")
-                    report_file.write(f"Plugin Total Time: {row['total_time_ms']:.2f} ms\n")
-                    report_file.write(f"Plugin Avg Time Per Operation: {row['avg_time_ms']:.2f} ms\n")
-                    
-                    # Calculate plugin contribution to total IKE latency if both are available
-                    if isinstance(avg_latency, float):
-                        avg_latency_ms = avg_latency * 1000  # Convert to ms
-                        plugin_percentage = (row['total_time_ms'] / avg_latency_ms) * 100 if avg_latency_ms > 0 else 0
-                        report_file.write(f"Plugin Contribution: {plugin_percentage:.2f}% of IKE latency\n")
-                else:
-                    report_file.write(f"Plugin Timing Data: Available but missing columns {missing_cols}\n")
+                if 'total_algorithms' in available_cols:
+                    report_file.write(f"Plugin Operations Count: {row['total_algorithms']}\n")
+                
+                if 'total_time_ms' in available_cols:
+                    report_file.write(f"Plugin Sum of Times: {row['total_time_ms']:.2f} ms\n")
+                
+                # Add the new metric - total plugin time (first creation to last destruction)
+                if 'total_time_plugin_ms' in available_cols:
+                    report_file.write(f"Plugin Total Time (first to last): {row['total_time_plugin_ms']:.2f} ms\n")
+                
+                # Average time per operation if we have both pieces of data
+                if 'total_time_ms' in available_cols and 'total_algorithms' in available_cols and row['total_algorithms'] > 0:
+                    avg_time_per_op = row['total_time_ms'] / row['total_algorithms']
+                    report_file.write(f"Plugin Avg Time Per Operation: {avg_time_per_op:.2f} ms\n")
+                
+                # Calculate plugin contribution to total IKE latency if both are available
+                if isinstance(avg_latency, float) and 'total_time_ms' in available_cols:
+                    avg_latency_ms = avg_latency * 1000  # Convert to ms
+                    plugin_percentage = (row['total_time_ms'] / avg_latency_ms) * 100 if avg_latency_ms > 0 else 0
+                    report_file.write(f"Plugin Sum Contribution: {plugin_percentage:.2f}% of IKE latency\n")
+                
+                # Calculate plugin total time contribution to IKE latency
+                if isinstance(avg_latency, float) and 'total_time_plugin_ms' in available_cols:
+                    avg_latency_ms = avg_latency * 1000  # Convert to ms
+                    plugin_total_percentage = (row['total_time_plugin_ms'] / avg_latency_ms) * 100 if avg_latency_ms > 0 else 0
+                    report_file.write(f"Plugin Total Contribution: {plugin_total_percentage:.2f}% of IKE latency\n")
             else:
                 report_file.write("Plugin Timing Data: Not available\n")
             
@@ -406,8 +438,7 @@ def main():
             # Process plugin timing data for this iteration - now separate from run_test_iteration
             iteration_stats = process_plugin_timing_data(
                 PLUGIN_TIMING_LOG, 
-                f"iteration_{i}", 
-                OUTPUT_DIR, 
+                f"iteration_{i}",
                 log_message
             )
             
