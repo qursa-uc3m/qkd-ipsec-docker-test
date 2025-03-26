@@ -51,7 +51,7 @@ echo "Tests completed. Results accesible in $OUTPUT_DIR/."
 # Run analysis if not disabled
 if [ "$ANALYZE_RESULTS" = true ]; then
   echo "Analyzing results..."
-  python3 analyze_results.py "results/results.csv" "$OUTPUT_DIR/analysis"
+  python3 analyze_results.py "results/latencies.csv" "$OUTPUT_DIR/analysis"
   echo "Analysis completed! Results available in $OUTPUT_DIR/analysis/"
 fi
 

@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.dev
       args:
         BUILD_QKD_ETSI: "true"
-        BUILD_QKD_KEM: "false"
+        BUILD_QKD_KEM: "true"
         QKD_BACKEND: ${QKD_BACKEND:-simulated}
         ACCOUNT_ID: ${ACCOUNT_ID:-}
     image: strongswan-base:latest

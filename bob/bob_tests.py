@@ -17,19 +17,23 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 config_file = "/etc/swanctl/swanctl.conf"
 
 proposals = [
+    "aes128-sha256-ecp256",
     "aes128-sha256-x25519",
-    "aes128-sha256-x448",
-    "aes128-sha256-kyber1",
-    "aes128-sha256-hqc1",
-    "aes128-sha256-qkd"
+    #"aes128-sha256-kyber1",
+    #"aes128-sha256-hqc1",
+    "aes128-sha256-qkd", 
+    "aes128-sha256-qkd_kyber1",
+    #"aes128-sha256-qkd_hqc1",
 ]
 
 esp_proposals = [
+    "aes128-sha256-ecp256",
     "aes128-sha256-x25519",
-    "aes128-sha256-x448",
-    "aes128-sha256-kyber1",
-    "aes128-sha256-hqc1",
-    "aes128-sha256-qkd"
+    #"aes128-sha256-kyber1",
+    #"aes128-sha256-hqc1",
+    "aes128-sha256-qkd", 
+    "aes128-sha256-qkd_kyber1",
+    #"aes128-sha256-qkd_hqc1",
 ]
 
 # Function to run a command with proper environment sourcing

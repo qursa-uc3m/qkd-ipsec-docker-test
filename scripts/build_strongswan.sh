@@ -43,6 +43,7 @@ echo "Configuring the build..."
     --enable-updown \
     --enable-vici \
     --enable-qkd \
+    --enable-qkd-kem \
     --enable-silent-rules \
     LDFLAGS="-luuid"
 
