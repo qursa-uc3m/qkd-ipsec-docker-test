@@ -6,7 +6,6 @@ import socket
 import re
 import pandas as pd
 import os
-import sys
 import argparse
 
 def parse_arguments():
@@ -148,7 +147,145 @@ def process_ike_data(ts_res, output_dir, prop, log_message):
     
     return latencies, init_request_count, resp_response_count
 
-def generate_report(output_dir, proposals, df_latencies, df_counters, log_message):
+def reset_timing_log(log_file_path, log_message):
+    try:
+        with open(log_file_path, "w") as f:
+            f.write("method,create_timestamp,create_microseconds,destroy_timestamp,destroy_microseconds\n")
+        log_message(f"Initialized timing log at {log_file_path}")
+        return True
+    except Exception as e:
+        log_message(f"Error initializing timing log: {e}")
+        return False
+
+def process_plugin_timing_data(plugin_timing_log, prop, output_dir, log_message):
+    """
+    Process plugin timing data from temporary file for each proposal
+    
+    Args:
+        plugin_timing_log: Path to the plugin timing log file
+        prop: The cryptographic proposal being tested
+        output_dir: Directory for output files
+        log_message: Function for logging messages
+        
+    Returns:
+        A dictionary with timing statistics
+    """
+    log_message(f"Processing plugin timing data for proposal: {prop}")
+    
+    # Check if the timing log exists
+    if not os.path.exists(plugin_timing_log):
+        log_message(f"Timing log file {plugin_timing_log} not found")
+        return {
+            "proposal": prop,
+            "algorithms_count": 0,
+            "total_time_ms": 0,
+            "avg_time_ms": 0,
+            "min_time_ms": 0,
+            "max_time_ms": 0
+        }
+    
+    try:
+        # Read the timing log file
+        # Print raw file content for debugging
+        with open(plugin_timing_log, 'r') as f:
+            content = f.read()
+            log_message(f"Raw timing log content:\n{content}")
+        timing_df = pd.read_csv(plugin_timing_log)
+        
+        # If the file is empty or has no data, return default values
+        if timing_df.empty:
+            log_message("No plugin timing data found")
+            return {
+                "proposal": prop,
+                "algorithms_count": 0,
+                "total_time_ms": 0,
+                "avg_time_ms": 0,
+                "min_time_ms": 0,
+                "max_time_ms": 0
+            }
+        
+        # Convert timestamp columns to numeric types
+        numeric_cols = ['create_timestamp', 'create_microseconds', 'destroy_timestamp', 'destroy_microseconds']
+        for col in numeric_cols:
+            if col in timing_df.columns:
+                timing_df[col] = pd.to_numeric(timing_df[col], errors='coerce')
+        
+        # Calculate time differences in milliseconds
+        timing_df['time_diff_ms'] = (
+            (timing_df['destroy_timestamp'] - timing_df['create_timestamp']) * 1000 + 
+            (timing_df['destroy_microseconds'] - timing_df['create_microseconds']) / 1000
+        )
+        
+        # Remove any rows with NaN or empty method values
+        timing_df = timing_df.dropna(subset=['method'])
+        # Count the number of algorithms (rows)
+        algo_count = len(timing_df)
+        
+        # Calculate statistics
+        total_time_ms = timing_df['time_diff_ms'].sum()
+                
+        # Return the statistics
+        return {
+            "proposal": prop,
+            "algorithms_count": algo_count,
+            "total_time_ms": total_time_ms
+        }
+        
+    except Exception as e:
+        log_message(f"Error processing plugin timing data: {e}")
+        return {
+            "proposal": prop,
+            "algorithms_count": 0,
+            "total_time_ms": 0,
+            "avg_time_ms": 0,
+            "min_time_ms": 0,
+            "max_time_ms": 0
+        }
+    
+def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_message):
+    """
+    Aggregate plugin timing data across multiple iterations for a proposal
+    
+    Args:
+        proposal_iterations: List of dictionaries with iteration-level timing stats
+        prop: The proposal name
+        num_iterations: Number of iterations run
+        log_message: Logging function
+        
+    Returns:
+        Dictionary with aggregated timing statistics for the proposal
+    """
+    log_message(f"Aggregating plugin timing data for proposal: {prop}")
+    
+    # Check if algorithm count is consistent across iterations
+    algorithm_counts = [iter_data["algorithms_count"] for iter_data in proposal_iterations]
+    
+    if not algorithm_counts:
+        log_message(f"Warning: No algorithm counts data available for {prop}")
+        total_algorithms = 0
+        is_consistent = True
+    else:
+        # Check if all counts are the same
+        is_consistent = all(count == algorithm_counts[0] for count in algorithm_counts)
+        total_algorithms = algorithm_counts[0] if is_consistent else max(set(algorithm_counts), key=algorithm_counts.count)
+    if not is_consistent:
+        log_message(f"Warning: Inconsistent algorithm counts across iterations for {prop}: {algorithm_counts}")
+    
+    total_time_ms = sum(iter_data["total_time_ms"] for iter_data in proposal_iterations)
+    
+    # Calculate averages
+    avg_time_per_iter_ms = total_time_ms / num_iterations if num_iterations > 0 else 0
+    
+    # Create and return summary dictionary
+    return {
+        "proposal": prop,
+        "iterations": num_iterations,
+        "total_algorithms": total_algorithms,
+        "total_time_ms": total_time_ms,
+        "avg_time_per_iter_ms": avg_time_per_iter_ms
+    }
+
+def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_timing, log_message):
     """Generate the test report"""
     with open(f"{output_dir}/report.txt", "w") as report_file:
         report_file.write("StrongSwan QKD Plugin Performance Test Results\n")
@@ -172,11 +309,38 @@ def generate_report(output_dir, proposals, df_latencies, df_counters, log_messag
             if isinstance(avg_latency, float):
                 report_file.write(f"Average Latency: {avg_latency:.6f} seconds\n")
                 report_file.write(f"Min Latency: {min_latency:.6f} seconds\n")
-                report_file.write(f"Max Latency: {max_latency:.6f} seconds\n\n")
+                report_file.write(f"Max Latency: {max_latency:.6f} seconds\n")
             else:
                 report_file.write(f"Average Latency: {avg_latency}\n")
                 report_file.write(f"Min Latency: {min_latency}\n")
-                report_file.write(f"Max Latency: {max_latency}\n\n")
+                report_file.write(f"Max Latency: {max_latency}\n")
+                
+            # Add plugin timing data - this is the only new part
+            plugin_data = df_plugin_timing[df_plugin_timing['proposal'] == prop] if not df_plugin_timing.empty else pd.DataFrame()
+            
+            if not plugin_data.empty:
+                row = plugin_data.iloc[0]
+                
+                # Check if each column exists before trying to access it
+                required_cols = ['algorithms_count', 'total_time_ms', 'avg_time_ms']
+                missing_cols = [col for col in required_cols if col not in row.index]
+                
+                if not missing_cols:
+                    report_file.write(f"Plugin Operations Count: {row['algorithms_count']}\n")
+                    report_file.write(f"Plugin Total Time: {row['total_time_ms']:.2f} ms\n")
+                    report_file.write(f"Plugin Avg Time Per Operation: {row['avg_time_ms']:.2f} ms\n")
+                    
+                    # Calculate plugin contribution to total IKE latency if both are available
+                    if isinstance(avg_latency, float):
+                        avg_latency_ms = avg_latency * 1000  # Convert to ms
+                        plugin_percentage = (row['total_time_ms'] / avg_latency_ms) * 100 if avg_latency_ms > 0 else 0
+                        report_file.write(f"Plugin Contribution: {plugin_percentage:.2f}% of IKE latency\n")
+                else:
+                    report_file.write(f"Plugin Timing Data: Available but missing columns {missing_cols}\n")
+            else:
+                report_file.write("Plugin Timing Data: Not available\n")
+            
+            report_file.write("\n")
 
     log_message(f"Report generated in {output_dir}/report.txt")
 
@@ -187,7 +351,7 @@ def main():
     PORT = 12345
     OUTPUT_DIR = "/output"
     NUM_ITERATIONS = args.iterations
-    QKD_TIMING_LOG = "/tmp/qkd_timing.csv"
+    PLUGIN_TIMING_LOG = "/tmp/plugin_timing.csv"
     config_file = "/etc/swanctl/swanctl.conf"
 
     proposals = [
@@ -196,7 +360,7 @@ def main():
         #"aes128-sha256-kyber1",
         #"aes128-sha256-hqc1",
         "aes128-sha256-qkd", 
-        "aes128-sha256-qkd_kyber1",
+        #"aes128-sha256-qkd_kyber1",
         #"aes128-sha256-qkd_hqc1",
     ]
 
@@ -206,7 +370,7 @@ def main():
         #"aes128-sha256-kyber1",
         #"aes128-sha256-hqc1",
         "aes128-sha256-qkd", 
-        "aes128-sha256-qkd_kyber1",
+        #"aes128-sha256-qkd_kyber1",
         #"aes128-sha256-qkd_hqc1",
     ]
 
@@ -219,6 +383,7 @@ def main():
     # Initialize data structures
     df_counters = pd.DataFrame()  # For request/response counts
     df_latencies = pd.DataFrame()  # For latency measurements
+    df_plugin_timing = pd.DataFrame()
     
     # Establish connection with Bob
     conn, server_socket = establish_connection(HOST, PORT, NUM_ITERATIONS, log_message)
@@ -230,10 +395,26 @@ def main():
         
         # Start traffic capture
         tshark_proc, ts_res = capture_and_process_traffic(prop, OUTPUT_DIR, log_message)
+
+        # Store timing data for this proposal
+        proposal_iterations = []
         
         # Run test iterations
         for i in range(1, NUM_ITERATIONS + 1):
+            reset_timing_log(PLUGIN_TIMING_LOG, log_message)
             run_test_iteration(i, NUM_ITERATIONS, conn, log_message)
+            # Process plugin timing data for this iteration - now separate from run_test_iteration
+            iteration_stats = process_plugin_timing_data(
+                PLUGIN_TIMING_LOG, 
+                f"iteration_{i}", 
+                OUTPUT_DIR, 
+                log_message
+            )
+            
+            # Store iteration timing with proposal information
+            iteration_stats["proposal"] = prop
+            iteration_stats["iteration"] = i
+            proposal_iterations.append(iteration_stats)
         
         # Stop traffic capture
         log_message("Stop tshark...")
@@ -244,22 +425,38 @@ def main():
         latencies, init_request_count, resp_response_count = process_ike_data(
             ts_res, OUTPUT_DIR, prop, log_message
         )
+
+        # Aggregate timing data from all iterations for this proposal
+        proposal_summary = aggregate_plugin_timing(
+            proposal_iterations, prop, NUM_ITERATIONS, log_message
+        )
+        
+        # Add to proposal timing dataframe
+        df_plugin_timing = pd.concat([
+            df_plugin_timing,
+            pd.DataFrame([proposal_summary])
+        ], ignore_index=True)
         
         # Store data
         df_counters.at[0, f"{prop}_init_requests"] = init_request_count
         df_counters.at[0, f"{prop}_resp_responses"] = resp_response_count
         df_latencies[prop] = latencies
         
-        # Save DataFrames
-        counters_file = f"{OUTPUT_DIR}/counters.csv"
-        latencies_file = f"{OUTPUT_DIR}/latencies.csv"
-        df_counters.to_csv(counters_file, index=False)
-        df_latencies.to_csv(latencies_file, index=False)
-        log_message(f"Counter data stored in '{counters_file}'")
-        log_message(f"Latency data stored in '{latencies_file}'")
+    # Save DataFrames
+    counters_file = f"{OUTPUT_DIR}/counters.csv"
+    latencies_file = f"{OUTPUT_DIR}/latencies.csv"
+    plugin_timing_file = f"{OUTPUT_DIR}/plugin_timing_summary.csv"
+
+    df_counters.to_csv(counters_file, index=False)
+    df_latencies.to_csv(latencies_file, index=False)
+    df_plugin_timing.to_csv(plugin_timing_file, index=False)
+
+    log_message(f"Counter data stored in '{counters_file}'")
+    log_message(f"Latency data stored in '{latencies_file}'")
+    log_message(f"Plugin timing data stored in '{plugin_timing_file}'")
     
     # Generate report
-    generate_report(OUTPUT_DIR, proposals, df_latencies, df_counters, log_message)
+    generate_report(OUTPUT_DIR, proposals, df_latencies, df_counters, df_plugin_timing, log_message)
     
     # Cleanup
     log_file.close()

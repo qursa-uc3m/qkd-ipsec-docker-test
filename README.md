@@ -120,6 +120,7 @@ python3 analyze_results.py
 ### What Gets Measured
 
 The test suite measures:
+
 - IKEv2 handshake latency with QKD enhancement
 - Performance across different cryptographic proposals
 - Statistical metrics (mean, standard deviation, min, max)
@@ -127,10 +128,12 @@ The test suite measures:
 ### Test Results
 
 Test results are stored in two locations:
+
 - **Raw data**: Generated in the `results/` directory
 - **Analysis output**: Visualizations and reports in the `analysis/` directory
 
 The analysis includes:
+
 - Comparative bar charts of average handshake latencies
 - Box plots showing the distribution of latencies
 - Statistical summary in CSV and text formats
@@ -140,11 +143,13 @@ The analysis includes:
 To test different cryptographic proposals:
 
 1. Stop the running containers:
+
 ```bash
 docker-compose -f docker-compose.dev.yml down
 ```
 
 2. Modify the `proposals` and `esp_proposals` lists in both test scripts (`alice_tests.py` and `bob_tests.py`):
+
 ```python
 proposals = [
     "aes128-sha256-x25519",
@@ -154,11 +159,13 @@ proposals = [
 ```
 
 3. Restart the containers:
+
 ```bash
 docker-compose -f docker-compose.dev.yml up -d
 ```
 
 4. Run the tests again:
+
 ```bash
 ./run_tests.sh
 ```
