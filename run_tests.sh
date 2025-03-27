@@ -4,8 +4,8 @@
 set -e  # Exit on error
 
 # Default configuration
-ITERATIONS=10
-OUTPUT_DIR="results"
+ITERATIONS=2
+OUTPUT_DIR="./results"
 ANALYZE_RESULTS=true
 
 # Parse command line arguments
@@ -51,7 +51,7 @@ echo "Tests completed. Results accesible in $OUTPUT_DIR/."
 # Run analysis if not disabled
 if [ "$ANALYZE_RESULTS" = true ]; then
   echo "Analyzing results..."
-  python3 analyze_results.py "results/latencies.csv" "$OUTPUT_DIR/analysis"
+  python3 analyze_results.py "./results/plugin_timing_summary.csv" "$OUTPUT_DIR/analysis"
   echo "Analysis completed! Results available in $OUTPUT_DIR/analysis/"
 fi
 

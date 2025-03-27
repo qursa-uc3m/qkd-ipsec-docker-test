@@ -286,12 +286,27 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
     if not is_consistent:
         log_message(f"Warning: Inconsistent algorithm counts across iterations for {prop}: {algorithm_counts}")
     
+    # Collect all the timing values
+    all_times_ms = [iter_data["total_time_ms"] for iter_data in proposal_iterations]
+    all_plugin_times_ms = [iter_data["total_time_plugin_ms"] for iter_data in proposal_iterations]
+    
     # Total time inside plugins
-    total_time_ms = sum(iter_data["total_time_ms"] for iter_data in proposal_iterations)
+    total_time_ms = sum(all_times_ms)
     avg_time_per_iter_ms = total_time_ms / num_iterations if num_iterations > 0 else 0
+    # Calculate standard deviation for total_time_ms
+    if len(all_times_ms) > 1:
+        stddev_time_ms = pd.Series(all_times_ms).std()
+    else:
+        stddev_time_ms = 0
+    
     # Total time between first creation and last destruction
-    total_time_plugin_ms = sum(iter_data["total_time_plugin_ms"] for iter_data in proposal_iterations)
+    total_time_plugin_ms = sum(all_plugin_times_ms)
     avg_time_plugin_ms = total_time_plugin_ms / total_algorithms if total_algorithms > 0 else 0
+    # Calculate standard deviation for total_time_plugin_ms
+    if len(all_plugin_times_ms) > 1:
+        stddev_plugin_ms = pd.Series(all_plugin_times_ms).std()
+    else:
+        stddev_plugin_ms = 0
     
     # Create and return summary dictionary
     return {
@@ -301,7 +316,9 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
         "total_time_ms": total_time_ms,
         "total_time_plugin_ms": total_time_plugin_ms,
         "avg_time_per_iter_ms": avg_time_per_iter_ms,
-        "avg_time_plugin_ms": avg_time_plugin_ms
+        "avg_time_plugin_ms": avg_time_plugin_ms,
+        "stddev_time_ms": stddev_time_ms,
+        "stddev_plugin_ms": stddev_plugin_ms
     }
 
 def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_timing, log_message):
@@ -315,8 +332,9 @@ def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_
                 avg_latency = df_latencies[prop].mean()
                 min_latency = df_latencies[prop].min()
                 max_latency = df_latencies[prop].max()
+                std_latency = df_latencies[prop].std() if len(df_latencies[prop]) > 1 else 0
             else:
-                avg_latency = min_latency = max_latency = "N/A"
+                avg_latency = min_latency = max_latency = std_latency = "N/A"
                 
             init_count = df_counters.at[0, f"{prop}_init_requests"] if f"{prop}_init_requests" in df_counters else "N/A"
             resp_count = df_counters.at[0, f"{prop}_resp_responses"] if f"{prop}_resp_responses" in df_counters else "N/A"
@@ -327,10 +345,12 @@ def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_
             
             if isinstance(avg_latency, float):
                 report_file.write(f"Average Latency: {avg_latency:.6f} seconds\n")
+                report_file.write(f"Standard Deviation: {std_latency:.6f} seconds\n")
                 report_file.write(f"Min Latency: {min_latency:.6f} seconds\n")
                 report_file.write(f"Max Latency: {max_latency:.6f} seconds\n")
             else:
                 report_file.write(f"Average Latency: {avg_latency}\n")
+                report_file.write(f"Standard Deviation: {std_latency}\n")
                 report_file.write(f"Min Latency: {min_latency}\n")
                 report_file.write(f"Max Latency: {max_latency}\n")
                 
@@ -348,10 +368,21 @@ def generate_report(output_dir, proposals, df_latencies, df_counters, df_plugin_
                 
                 if 'total_time_ms' in available_cols:
                     report_file.write(f"Plugin Sum of Times: {row['total_time_ms']:.2f} ms\n")
+                    if 'stddev_time_ms' in available_cols:
+                        report_file.write(f"Plugin Sum Std Dev: {row['stddev_time_ms']:.2f} ms\n")
                 
                 # Add the new metric - total plugin time (first creation to last destruction)
                 if 'total_time_plugin_ms' in available_cols:
                     report_file.write(f"Plugin Total Time (first to last): {row['total_time_plugin_ms']:.2f} ms\n")
+                    if 'stddev_plugin_ms' in available_cols:
+                        report_file.write(f"Plugin Total Time Std Dev: {row['stddev_plugin_ms']:.2f} ms\n")
+                
+                # Average times with standard deviations
+                if 'avg_time_per_iter_ms' in available_cols:
+                    report_file.write(f"Plugin Avg Time Per Iteration: {row['avg_time_per_iter_ms']:.2f} ms\n")
+                
+                if 'avg_time_plugin_ms' in available_cols:
+                    report_file.write(f"Plugin Avg Time Per Algorithm: {row['avg_time_plugin_ms']:.2f} ms\n")
                 
                 # Average time per operation if we have both pieces of data
                 if 'total_time_ms' in available_cols and 'total_algorithms' in available_cols and row['total_algorithms'] > 0:
@@ -389,9 +420,9 @@ def main():
     proposals = [
         "aes128-sha256-ecp256",
         "aes128-sha256-x25519",
-        #"aes128-sha256-kyber1",
+        "aes128-sha256-kyber1",
         #"aes128-sha256-hqc1",
-        "aes128-sha256-qkd", 
+        "aes128-sha256-qkd",
         #"aes128-sha256-qkd_kyber1",
         #"aes128-sha256-qkd_hqc1",
     ]
@@ -399,9 +430,9 @@ def main():
     esp_proposals = [
         "aes128-sha256-ecp256",
         "aes128-sha256-x25519",
-        #"aes128-sha256-kyber1",
+        "aes128-sha256-kyber1",
         #"aes128-sha256-hqc1",
-        "aes128-sha256-qkd", 
+        "aes128-sha256-qkd",
         #"aes128-sha256-qkd_kyber1",
         #"aes128-sha256-qkd_hqc1",
     ]
