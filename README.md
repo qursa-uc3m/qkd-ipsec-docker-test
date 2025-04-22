@@ -157,6 +157,7 @@ proposals = [
     # Add new proposals here
 ]
 ```
+* For enabling intermediate IKEv2 handshakes in Strongswan, you must use a ke1_, ke2_, etc, prefix before the desired curve/qkd/kem name. The number indicates the step order. 
 
 3. Restart the containers:
 

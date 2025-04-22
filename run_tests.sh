@@ -41,18 +41,18 @@ echo "Running tests with $ITERATIONS iterations..."
 echo "Results will be stored in $OUTPUT_DIR/"
 
 # Start Bob's test script in the background
-docker exec -d bob bash -c "source /set_env.sh && python3 /etc/swanctl/bob_tests.py"
+docker exec -d bob bash -c "export IS_TLS_SERVER=1 && source /set_env.sh && python3 /etc/swanctl/bob_tests.py"
 
 # Run Alice's test script
-docker exec alice bash -c "source /set_env.sh && python3 /etc/swanctl/alice_tests.py --iterations $ITERATIONS"
+docker exec alice bash -c "chmod -R 777 /output && source /set_env.sh && python3 /etc/swanctl/alice_tests.py --iterations $ITERATIONS"
 
 echo "Tests completed. Results accesible in $OUTPUT_DIR/."
 
 # Run analysis if not disabled
 if [ "$ANALYZE_RESULTS" = true ]; then
   echo "Analyzing results..."
-  python3 analyze_results.py "./results/plugin_timing_summary.csv" "$OUTPUT_DIR/analysis"
-  echo "Analysis completed! Results available in $OUTPUT_DIR/analysis/"
+  python3 analyze_results.py "./results/plugin_timing_summary.csv" "analysis"
+  echo "Analysis completed! Results available in analysis/"
 fi
 
 # Optionally, stop containers

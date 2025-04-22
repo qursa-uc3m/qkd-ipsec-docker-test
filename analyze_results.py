@@ -101,6 +101,7 @@ def analyze_results(csv_file, output_dir="analysis"):
     plt.title("Average Time per Iteration by Proposal")
     plt.ylabel("Time (milliseconds)")
     plt.xlabel("Proposal")
+    plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     
     # Add values on top of bars
@@ -138,7 +139,7 @@ def analyze_results(csv_file, output_dir="analysis"):
         ax.set_ylabel('Time (milliseconds)')
         ax.set_title('Comparison of Average Timing Metrics with Standard Deviation')
         ax.set_xticks(x)
-        ax.set_xticklabels(df.index)
+        ax.set_xticklabels(df.index, rotation=45, ha='right')
         ax.legend()
         
         # Add value annotations
@@ -183,7 +184,7 @@ def analyze_results(csv_file, output_dir="analysis"):
         ax.set_ylabel('Time (milliseconds)')
         ax.set_title('Total Time Metrics by Proposal')
         ax.set_xticks(x)
-        ax.set_xticklabels(df.index)
+        ax.set_xticklabels(df.index, rotation=45, ha='right')
         ax.legend()
         
         # Add value annotations
