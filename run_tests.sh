@@ -51,8 +51,8 @@ echo "Tests completed. Results accesible in $OUTPUT_DIR/."
 # Run analysis if not disabled
 if [ "$ANALYZE_RESULTS" = true ]; then
   echo "Analyzing results..."
-  python3 analyze_results.py "./results/plugin_timing_summary.csv" "analysis"
-  echo "Analysis completed! Results available in analysis/"
+  python3 analyze_results.py "./results/plugin_timing_summary.csv" "./analysis" --log-scale
+  echo "Analysis completed! Results available in /analysis"
 fi
 
 # Optionally, stop containers

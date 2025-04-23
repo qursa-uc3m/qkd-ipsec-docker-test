@@ -12,7 +12,7 @@ from matplotlib import rcParams
 def setup_matplotlib_styling():
     """Configure matplotlib with consistent styling without LaTeX"""
     # Disable LaTeX rendering
-    rcParams['text.usetex'] = False
+    rcParams['text.usetex'] = True
     
     # Keep the rest of the styling
     # Font configuration
@@ -33,7 +33,7 @@ def setup_matplotlib_styling():
    
     plt.style.use('seaborn-v0_8-whitegrid')
 
-def analyze_results(csv_file, output_dir="analysis"):
+def analyze_results(csv_file, output_dir="analysis", log_scale=False):
     """
     Analyze the plugin timing data and generate visualizations
     
@@ -96,12 +96,16 @@ def analyze_results(csv_file, output_dir="analysis"):
     # Generate visualizations
     
     # 1. Bar chart of average time per iteration with standard deviation
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 7))
     ax = df['avg_time_per_iter_ms'].plot(kind="bar", color='skyblue', yerr=df['stddev_time_ms'] if has_stddev else None)
     plt.title("Average Time per Iteration by Proposal")
     plt.ylabel("Time (milliseconds)")
     plt.xlabel("Proposal")
     plt.xticks(rotation=45, ha='right')
+
+    if log_scale:
+        ax.set_yscale('log')
+
     plt.tight_layout()
     
     # Add values on top of bars
@@ -109,8 +113,12 @@ def analyze_results(csv_file, output_dir="analysis"):
         text = f"{v:.2f}"
         if has_stddev:
             text += f"\n±{df['stddev_time_ms'].iloc[i]:.2f}"
-        ax.text(i, v + (max(df['avg_time_per_iter_ms']) * 0.02), text, 
-                horizontalalignment='center', fontsize=9)
+        # Adjust position based on scale type
+        y_pos = v + (max(df['avg_time_per_iter_ms']) * 0.02)
+        if log_scale:
+            # For log scale, use multiplicative factor instead of additive
+            y_pos = v * 1.1
+        ax.text(i, y_pos, text, horizontalalignment='center', fontsize=9)
     
     plt.savefig(f"{output_dir}/avg_time_per_iter.pdf")
     
@@ -134,6 +142,9 @@ def analyze_results(csv_file, output_dir="analysis"):
                         label='Avg Time per Algorithm', color='lightcoral',
                         yerr=df['stddev_plugin_ms'] if has_stddev else None)
         
+        if log_scale:
+            ax.set_yscale('log')
+        
         # Add labels, title and legend
         ax.set_xlabel('Proposal')
         ax.set_ylabel('Time (milliseconds)')
@@ -149,9 +160,15 @@ def analyze_results(csv_file, output_dir="analysis"):
                 text = f"{height:.2f}"
                 if stddevs is not None:
                     text += f"\n±{stddevs.iloc[i]:.2f}"
+                y_offset = 3
+                if log_scale:
+                    y_pos = height * 1.1
+                else:
+                    y_pos = height + (ax.get_ylim()[1] * 0.01)
+                
                 ax.annotate(text,
                             xy=(rect.get_x() + rect.get_width()/2, height),
-                            xytext=(0, 3),  # 3 points vertical offset
+                            xytext=(0, y_offset),  # vertical offset
                             textcoords="offset points",
                             ha='center', va='bottom', fontsize=8)
         
@@ -179,6 +196,9 @@ def analyze_results(csv_file, output_dir="analysis"):
         rects2 = ax.bar(x + width/2, df['total_time_plugin_ms'], width, 
                         label='Total Plugin Time (First to Last)', color='darkred')
         
+        if log_scale:
+            ax.set_yscale('log')
+        
         # Add labels, title and legend
         ax.set_xlabel('Proposal')
         ax.set_ylabel('Time (milliseconds)')
@@ -191,6 +211,11 @@ def analyze_results(csv_file, output_dir="analysis"):
         def autolabel(rects):
             for rect in rects:
                 height = rect.get_height()
+                if log_scale:
+                    y_pos = height * 1.1
+                else:
+                    y_pos = height + (ax.get_ylim()[1] * 0.01)
+
                 ax.annotate(f"{height:.2f}",
                             xy=(rect.get_x() + rect.get_width()/2, height),
                             xytext=(0, 3),  # 3 points vertical offset
@@ -282,6 +307,9 @@ def analyze_results(csv_file, output_dir="analysis"):
         
         if has_stddev:
             f.write(f"5. {output_dir}/timing_statistics_table.pdf - Statistical summary table\n")
+
+        if log_scale:
+            f.write("Note: All plots use logarithmic scale for y-axis\n\n")
     
     print(f"Analysis completed. Results saved to {output_dir}/")
     return True
@@ -289,10 +317,16 @@ def analyze_results(csv_file, output_dir="analysis"):
 if __name__ == "__main__":
     # Parse command line arguments
     if len(sys.argv) < 2:
-        print("Usage: python analyze_results.py <plugin_timing_file> [<output_dir>]")
+        print("Usage: python analyze_results.py <plugin_timing_file> [<output_dir>] [--log-scale]")
         sys.exit(1)
+    
+    # Extract the log_scale flag from arguments
+    log_scale = "--log-scale" in sys.argv
+    # Remove it from arguments if present
+    if log_scale:
+        sys.argv.remove("--log-scale")
     
     csv_file = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else "analysis"
     
-    analyze_results(csv_file, output_dir)
+    analyze_results(csv_file, output_dir, log_scale)
