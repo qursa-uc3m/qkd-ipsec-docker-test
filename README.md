@@ -1,6 +1,6 @@
 # QKD-IPSec Docker Testing Environment
 
-> **IMPORTANT NOTE:** The [qursa-uc3m strongSwan](https://github.com/qursa-uc3m/strongswan) repository (https://github.com/qursa-uc3m/strongswan) is temporarily unavailable. Since this repository is required during the Docker build process, the environment cannot be built until the repository is restored. We expect it to be available again soon. Please check back later.
+> **IMPORTANT NOTE:** The [qursa-uc3m strongSwan](https://github.com/qursa-uc3m/strongswan) repository (<https://github.com/qursa-uc3m/strongswan>) is temporarily unavailable. Since this repository is required during the Docker build process, the environment cannot be built until the repository is restored. We expect it to be available again soon. Please check back later.
 
 This repository contains a testing environment for our QKD-enabled strongSwan [fork](https://github.com/qursa-uc3m/strongswan/tree/qkd) which integrates Quantum Key Distribution into (in substitution of the) the IKEv2 protocol. The setup uses Docker containers to simulate a client-server (Alice-Bob) environment for testing secure communication channels.
 
@@ -57,7 +57,7 @@ docker-compose build --no-cache && docker-compose up
 ```
 
 ```bash
-QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.dev.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.dev.yml up
+QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.yml up
 ```
 
 ## Running Tests
@@ -107,8 +107,8 @@ export QKD_BACKEND=qukaydee
 export ACCOUNT_ID=2507
 
 # 2. Build and start containers (if not already running)
-docker-compose -f docker-compose.dev.yml build
-docker-compose -f docker-compose.dev.yml up -d
+docker-compose -f docker-compose.yml build
+docker-compose -f docker-compose.yml up -d
 
 # 3. Run the performance tests
 ./run_tests.sh
@@ -144,32 +144,33 @@ To test different cryptographic proposals:
 
 1. Stop the running containers:
 
-```bash
-docker-compose -f docker-compose.dev.yml down
-```
+   ```bash
+   docker-compose -f docker-compose.yml down
+   ```
 
 2. Modify the `proposals` and `esp_proposals` lists in both test scripts (`alice_tests.py` and `bob_tests.py`):
 
-```python
-proposals = [
-    "aes128-sha256-x25519",
-    "aes128-sha256-x448",
-    # Add new proposals here
-]
-```
-* For enabling intermediate IKEv2 handshakes in Strongswan, you must use a ke1_, ke2_, etc, prefix before the desired curve/qkd/kem name. The number indicates the step order. 
+   ```python
+   proposals = [
+      "aes128-sha256-x25519",
+      "aes128-sha256-x448",
+      # Add new proposals here
+   ]
+   ```
+
+   For enabling intermediate IKEv2 handshakes in Strongswan, you must use a ke1_, ke2_, etc, prefix before the desired curve/qkd/kem name. The number indicates the step order.
 
 3. Restart the containers:
 
-```bash
-docker-compose -f docker-compose.dev.yml up -d
-```
+   ```bash
+   docker-compose -f docker-compose.yml up -d
+   ```
 
 4. Run the tests again:
 
-```bash
-./run_tests.sh
-```
+   ```bash
+   ./run_tests.sh
+   ```
 
 This approach ensures a clean environment for each test run and prevents any state from previous tests from affecting new results.
 

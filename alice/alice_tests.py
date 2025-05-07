@@ -18,7 +18,13 @@ def parse_arguments():
 def setup_logging(output_dir):
     """Setup logging to both console and file"""
     log_file_path = f"{output_dir}/alice_log.txt"
-    log_file = open(log_file_path, "w")
+    
+    # Initialize log file with clear formatting
+    with open(log_file_path, "w") as log_file:
+        log_file.write("StrongSwan QKD Plugin Test - Alice Log\n")
+        log_file.write("====================================\n\n")
+    
+    log_file = open(log_file_path, "a")
     
     def log_message(message):
         print(message)  # Keep console output
@@ -32,8 +38,13 @@ def run_cmd(cmd, capture_output=False, start_new_session=False, input_data=None)
     # Prepend source command to ensure environment is loaded
     full_cmd = f"source /set_env.sh && {cmd}"
     
+    if cmd == "/charon":
+        # Use tee to capture the output to the log file
+        tee_cmd = f"{full_cmd} 2>&1 | tee -a {OUTPUT_DIR}/alice_log.txt"
+        return subprocess.Popen(["bash", "-c", tee_cmd], 
+                               start_new_session=True)
     # Run through bash to handle the source command
-    if capture_output:
+    elif capture_output:
         return subprocess.run(["bash", "-c", full_cmd], capture_output=True, text=True, input=input_data)
     elif start_new_session:
         return subprocess.Popen(["bash", "-c", full_cmd], 
@@ -86,18 +97,27 @@ def run_test_iteration(i, num_iterations, conn, log_message):
     log_message("Waiting for Bob to execute 'charon'...")
     data = conn.recv(1024).decode()
     
+    # Add a separator before StrongSwan output
+    log_message("\n----- StrongSwan Output Start -----\n")
+    
     log_message("Executing strongSwan...")
     strongswan_proc = run_cmd("/charon", start_new_session=True)
     time.sleep(3)  # Waiting 'charon' to be ready
     
     log_message("Starting strongSwan SA...")
-    run_cmd("swanctl --initiate --child net")
+    init_output = run_cmd("swanctl --initiate --child net", capture_output=True)
+    # Log the output of the swanctl command if available
+    if init_output.stdout:
+        log_message(init_output.stdout)
 
     time.sleep(3)
     
     log_message("Stop strongSwan...")
     subprocess.run(["pkill", "-f", "charon"])
     time.sleep(1)
+    
+    # Add a separator after StrongSwan output
+    log_message("\n----- StrongSwan Output End -----\n")
     
     log_message("Sending ACK to Bob ...")
     conn.send("0".encode())
@@ -164,7 +184,6 @@ def process_plugin_timing_data(plugin_timing_log, prop, log_message):
     Args:
         plugin_timing_log: Path to the plugin timing log file
         prop: The cryptographic proposal being tested
-        output_dir: Directory for output files
         log_message: Function for logging messages
         
     Returns:
@@ -412,6 +431,7 @@ def main():
     args = parse_arguments()
     HOST = "0.0.0.0"  
     PORT = 12345
+    global OUTPUT_DIR
     OUTPUT_DIR = "/output"
     NUM_ITERATIONS = args.iterations
     PLUGIN_TIMING_LOG = "/tmp/plugin_timing.csv"
@@ -433,7 +453,6 @@ def main():
         "aes128-sha256-kyber1",
         #"aes128-sha256-hqc1",
         "aes128-sha256-qkd",
-        #"aes128-sha256-qkd_kyber1",
         #"aes128-sha256-qkd_hqc1",
     ]
 
@@ -442,6 +461,10 @@ def main():
     
     # Setup logging
     log_message, log_file = setup_logging(OUTPUT_DIR)
+    
+    log_message("StrongSwan QKD Plugin Test - Alice Log")
+    log_message("====================================")
+    log_message(f"Starting test with {NUM_ITERATIONS} iterations per proposal")
     
     # Initialize data structures
     df_counters = pd.DataFrame()  # For request/response counts
@@ -453,6 +476,8 @@ def main():
     
     # Process each proposal
     for prop, esp_prop in zip(proposals, esp_proposals):
+        log_message(f"Testing proposal: {prop}, ESP: {esp_prop}")
+        
         # Update configuration
         update_config(config_file, prop, esp_prop, log_message)
         
@@ -481,7 +506,7 @@ def main():
         # Stop traffic capture
         log_message("Stop tshark...")
         tshark_proc.terminate()  
-        time.sleep(2)
+        time.sleep(1)
         
         # Process captured data
         latencies, init_request_count, resp_response_count = process_ike_data(
@@ -502,7 +527,9 @@ def main():
         # Store data
         df_counters.at[0, f"{prop}_init_requests"] = init_request_count
         df_counters.at[0, f"{prop}_resp_responses"] = resp_response_count
-        df_latencies[prop] = latencies
+        df_latencies[prop] = pd.Series(latencies)
+        
+        log_message(f"Completed testing with proposal: {prop}\n\n")
         
     # Save DataFrames
     counters_file = f"{OUTPUT_DIR}/counters.csv"
@@ -521,9 +548,11 @@ def main():
     generate_report(OUTPUT_DIR, proposals, df_latencies, df_counters, df_plugin_timing, log_message)
     
     # Cleanup
+    log_message("Test completed. Closing connections...")
     log_file.close()
     conn.close()
     server_socket.close()
+    log_message(f"Log saved to {OUTPUT_DIR}/alice_log.txt")
 
 if __name__ == "__main__":
     main()
