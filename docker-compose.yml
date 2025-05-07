@@ -4,7 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        BUILD_QKD_ETSI: "true"
         BUILD_QKD_KEM: "true"
+        QKD_BACKEND: ${QKD_BACKEND:-simulated}
+        ACCOUNT_ID: ${ACCOUNT_ID:-}
     image: strongswan-base:latest
     container_name: strongswan-base
   bob:
@@ -21,11 +24,12 @@ services:
     volumes:
       - ./bob:/etc/swanctl
       - ./strongswan.conf:/etc/strongswan.conf
+      - ./results:/output
     networks:
       internet:
-        ipv4_address: 192.168.0.2
+        ipv4_address: 172.30.0.2  # Changed from 192.168.0.2
       intranet:
-        ipv4_address: 10.1.0.2
+        ipv4_address: 172.31.0.2  # Changed from 10.1.0.2
   alice:
     image: strongswan-base:latest
     container_name: alice
@@ -40,17 +44,18 @@ services:
     volumes:
       - ./alice:/etc/swanctl
       - ./strongswan.conf:/etc/strongswan.conf
+      - ./results:/output
     networks:
       internet:
-        ipv4_address: 192.168.0.3
+        ipv4_address: 172.30.0.3  # Changed from 192.168.0.3
 networks:
   internet:
     ipam:
       driver: default 
       config:
-        - subnet: 192.168.0.0/24
+        - subnet: 172.30.0.0/24  # Changed from 192.168.0.0/24
   intranet:
     ipam:
       driver: default
       config:
-        - subnet: 10.1.0.0/16
+        - subnet: 172.31.0.0/16  # Changed from 10.1.0.0/16

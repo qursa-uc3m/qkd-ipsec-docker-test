@@ -5,3 +5,20 @@
 /bob/pkcs8/*
 /bob/x509/*
 /bob/x509ca/*
+/qkd_certs/*
+*.pem
+*.crt 
+*.keyç
+
+# venv
+.test-venv
+.test-venv/*
+/.pytest_cache/*
+
+# data
+results/*
+analysis/*
+analysis_*/
+*.pdf
+*.csv
+.old

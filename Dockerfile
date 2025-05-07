@@ -1,19 +1,22 @@
-# Base image
-# Use the official Ubuntu 22.04 as the base image
+# Base image 
 FROM ubuntu:22.04
 
 # Build argument for QKD support
-ARG BUILD_QKD_KEM=true
-ARG STRONGSWAN_BRANCH=qkd
-ARG STRONGSWAN_REPO=https://github.com/qursa-uc3m/strongswan.git
+ARG BUILD_QKD_ETSI=true
+ARG BUILD_QKD_KEM=false
+ARG QKD_BACKEND=simulated
+ARG ACCOUNT_ID=
 
-# Set environment variable for non-interactive installation
+# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV OPENSSL_CONF=/etc/ssl/qkd-kem-openssl.cnf
 ENV OPENSSL_MODULES=/usr/local/lib/ossl-modules
 ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/ossl-modules
+# Pass build args to env vars
+ENV QKD_BACKEND=${QKD_BACKEND}
+ENV ACCOUNT_ID=${ACCOUNT_ID}
 
-# Install build dependencies
+# Install build dependencies and testing tools
 RUN apt-get update && apt-get install -y \
     iproute2 \
     iputils-ping \
@@ -37,27 +40,65 @@ RUN apt-get update && apt-get install -y \
     bison \
     python3 \
     gperf \
+    uuid-dev \
+    net-tools \
+    iptables \
+    tcpdump \
+    curl \
+    libcurl4-openssl-dev \
+    libjansson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY config/openssl.cnf /etc/ssl/qkd-kem-openssl.cnf
 
-RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-etsi-api.git /qkd-etsi-api && \
-    git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+# Create directory for QKD certificates
+RUN mkdir -p /qkd_certs
+
+# Copy QKD certificates
+# Using a multi-stage build to conditionally copy
+COPY qkd_certs /qkd_certs
+
+# Clone and build QKD ETSI API if requested
+RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
+    git clone https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper.git /qkd-etsi-api-c-wrapper; \
     fi
 
+# Copy build and environment scripts
 COPY scripts/build_*.sh /
-RUN chmod +x /build_*.sh
+COPY scripts/set_env.sh /
+RUN chmod +x /build_*.sh /set_env.sh
 
-RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
-    /build_qkd_etsi.sh && \
-    /build_qkd_kem_provider.sh; \
+# Build QKD ETSI API
+RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
+    /build_qkd_etsi.sh; \
     fi
 
-# Clone strongSwan repository
-RUN git clone -b "$STRONGSWAN_BRANCH" "$STRONGSWAN_REPO" /strongswan;
+# Build QKD KEM provider if requested
+RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
+        git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+        /build_qkd_kem_provider.sh; \
+    else \
+        /build_liboqs.sh; \
+    fi
 
-# Build strongSwan
+# Install Python and required packages
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    tshark \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install required Python packages
+RUN pip3 install pandas
+
+# Create directory for output
+RUN mkdir -p /output
+
+# Create strongSwan directory and copy local source
+WORKDIR /strongswan
+COPY ./strongswan/ .
+
+# Build strongSwan from local directory
 RUN /build_strongswan.sh
 
 # Create symlink for charon daemon
@@ -66,4 +107,4 @@ RUN ln -s /usr/libexec/ipsec/charon /charon
 # Expose ports
 # 500: IKE
 # 4500: NAT-T
-EXPOSE 500 4500
+EXPOSE 500/udp 4500/udp

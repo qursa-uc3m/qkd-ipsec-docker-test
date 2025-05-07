@@ -26,6 +26,7 @@ echo "Configuring the build..."
     --enable-nonce \
     --enable-random \
     --enable-openssl \
+    --enable-oqs \
     --enable-pem \
     --enable-x509 \
     --enable-pubkey \
@@ -41,8 +42,10 @@ echo "Configuring the build..."
     --enable-eap-tls \
     --enable-updown \
     --enable-vici \
+    --enable-qkd \
     --enable-qkd-kem \
-    --enable-silent-rules
+    --enable-silent-rules \
+    LDFLAGS="-luuid"
 
 echo "Building strongSwan..."
 make -j$(nproc)
