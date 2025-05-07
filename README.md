@@ -38,27 +38,58 @@ strongswan.conf  # Main strongSwan configuration
 
 ## Setup
 
-Generate certificates (run outside Docker):
+### Setting up QKD Certificates
+
+To configure certificates for QKD node communication:
+
+1. Create a `qkd_certs` folder in the root directory of the project.
+
+2. For QuKayDee backend:
+
+   - Download the server CA certificate from QuKayDee (named `account-<your_account_id>-server-ca-qukaydee-com.crt`)
+   - Create/obtain SAE certificates:
+      - `sae-1.crt` and `sae-1.key` for the master node
+      - `sae-2.crt` and `sae-2.key` for the slave node
+      - Place all certificates in the `qkd_certs` folder
+
+3. Set required environment variables:
+
+   ```bash
+   export QKD_BACKEND=qukaydee
+   export ACCOUNT_ID=<your_account_id>
+   ```
+
+The environment script will automatically configure paths to certificates when containers start.
+
+The certificates are required for mutual authentication between your application and the QKD nodes. Follow the instructions in the [QuKayDee documentation](https://qukaydee.com/pages/getting_started) to generate the proper certificates and don't forget to upload your client's root certificate to their platform.
+
+Other QKD backends like `cerberis-xgr` work analogously, although some variables like `ACCOUNT_ID` may not be necessary depending on the backend. The setup script will configure the appropriate environment variables based on the selected backend.
+
+### Certificate Generation and Environment Preparation
+
+Before deploying the testing environment, generate the required certificates (run outside Docker):
 
 ```bash
 ./scripts/gen_certs.sh
 ```
 
-Clean Docker environment (optional):
+If you've previously run the containers, you may want to clean your Docker environment to avoid conflicts:
 
 ```bash
 sudo docker system prune -a --volumes
 ```
 
-Build and launch containers:
+### Building and Launching Containers
+
+Build and launch containers (in this example we use QuKayDee cloud-based QKD network simulator):
 
 ```bash
-docker-compose build --no-cache && docker-compose up
+QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml up
 ```
 
-```bash
-QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=2509 docker-compose -f docker-compose.yml up
-```
+Replace `<your_account_id>` with your actual QuKayDee account ID. The environment will automatically use the certificates in your `qkd_certs` directory as specified in the configuration script.
+
+[Configuring the QuKayDee environment](/home/javi/Documents/apps/QURSA/qkd-kem-provider/qkd_certs)
 
 ## Running Tests
 
@@ -104,7 +135,7 @@ To execute the complete benchmark test suite for (e.g. the QuKayDee service):
 ```bash
 # 1. Set required environment variables
 export QKD_BACKEND=qukaydee
-export ACCOUNT_ID=2507
+export ACCOUNT_ID=<your_account_id>
 
 # 2. Build and start containers (if not already running)
 docker-compose -f docker-compose.yml build
