@@ -1,0 +1,17 @@
+# Cryptographic proposals to test
+# Format: encryption-integrity-keyexchange
+proposals:
+  - aes128-sha256-ecp256    # Traditional elliptic curve
+  - aes128-sha256-x25519    # Modern elliptic curve
+  - aes128-sha256-kyber1    # Post-quantum KEM
+  - aes128-sha256-qkd       # Pure QKD
+  - aes128-sha256-qkd_kyber1  # Hybrid QKD+PQC
+
+# ESP (Encapsulating Security Payload) proposals
+# Using same as IKE proposals for consistency
+esp_proposals:
+  - aes128-sha256-ecp256
+  - aes128-sha256-x25519
+  - aes128-sha256-kyber1
+  - aes128-sha256-qkd
+  - aes128-sha256-qkd_kyber1

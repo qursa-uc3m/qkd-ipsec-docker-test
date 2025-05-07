@@ -23,6 +23,7 @@ services:
     tty: true
     volumes:
       - ./bob:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
       - ./strongswan.conf:/etc/strongswan.conf
       - ./results:/output
     networks:
@@ -43,6 +44,7 @@ services:
     tty: true
     volumes:
       - ./alice:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
       - ./strongswan.conf:/etc/strongswan.conf
       - ./results:/output
     networks:

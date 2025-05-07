@@ -179,17 +179,40 @@ To test different cryptographic proposals:
    docker-compose -f docker-compose.yml down
    ```
 
-2. Modify the `proposals` and `esp_proposals` lists in both test scripts (`alice_tests.py` and `bob_tests.py`):
+2. Edit the shared configuration file:
 
-   ```python
-   proposals = [
-      "aes128-sha256-x25519",
-      "aes128-sha256-x448",
-      # Add new proposals here
-   ]
+   ```bash
+   nano ./config/shared/proposals_config.yml
    ```
 
-   For enabling intermediate IKEv2 handshakes in Strongswan, you must use a ke1_, ke2_, etc, prefix before the desired curve/qkd/kem name. The number indicates the step order.
+   This YAML file contains the cryptographic proposals to test:
+
+   ```yaml
+   # Quantum Key Distribution and Post-Quantum Cryptography Test Configuration
+
+   # Test parameters
+   test_iterations: 3  # Number of times to run each proposal test
+
+   # Cryptographic proposals to test
+   # Format: encryption-integrity-keyexchange
+   proposals:
+   - aes128-sha256-ecp256    # Traditional elliptic curve
+   - aes128-sha256-x25519    # Modern elliptic curve
+   - aes128-sha256-kyber1    # Post-quantum KEM
+   - aes128-sha256-qkd       # Pure QKD
+   - aes128-sha256-qkd_kyber1  # Hybrid QKD+PQC
+
+   # ESP (Encapsulating Security Payload) proposals
+   esp_proposals:
+   - aes128-sha256-ecp256
+   - aes128-sha256-x25519
+   - aes128-sha256-kyber1
+   - aes128-sha256-qkd
+   - aes128-sha256-qkd_kyber1
+   ```
+
+   You can modify the proposals by adding or removing items from these lists. Both Alice and Bob will automatically use the same configuration.
+   For enabling intermediate IKEv2 handshakes in Strongswan, you must use a `ke1_`, `ke2_`, etc. prefix before the desired curve/qkd/kem name. The number indicates the step order.
 
 3. Restart the containers:
 

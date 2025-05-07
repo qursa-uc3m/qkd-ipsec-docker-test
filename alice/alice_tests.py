@@ -1,12 +1,13 @@
 # Alice: Testing Script
 
+import argparse
+import os
+import pandas as pd
+import re
+import socket
 import subprocess
 import time
-import socket
-import re
-import pandas as pd
-import os
-import argparse
+import yaml
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -32,6 +33,61 @@ def setup_logging(output_dir):
         log_file.flush()  # Ensure it's written immediately
     
     return log_message, log_file
+
+def load_proposals(config_path, args, log_message=None):
+    """
+    Load cryptographic proposals from the YAML configuration file.
+    
+    Args:
+        config_path: Path to the YAML configuration file
+        args: Command line arguments
+        log_message: Optional logging function
+        
+    Returns:
+        tuple: (proposals, esp_proposals, num_iterations)
+    """
+    # Default values if config loading fails
+    default_proposals = [
+        "aes128-sha256-ecp256",
+        "aes128-sha256-x25519",
+        "aes128-sha256-kyber1",
+        "aes128-sha256-qkd",
+        "aes128-sha256-qkd_kyber1",
+    ]
+    default_iterations = 3
+    
+    # Initialize with defaults
+    proposals = default_proposals
+    num_iterations = args.iterations if args.iterations is not None else default_iterations
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            
+            # Load proposals
+            if 'proposals' in config:
+                proposals = config['proposals']
+                
+            # Use config file iterations only if not specified via command line
+            if args.iterations is None and 'test_iterations' in config:
+                num_iterations = config.get('test_iterations', default_iterations)
+                
+            # Log loading success if log function is provided
+            if log_message:
+                log_message(f"Loaded proposals from {config_path}: {proposals}")
+                
+    except Exception as e:
+        error_msg = f"Error loading proposal configuration: {e}. Using defaults."
+        print(error_msg)
+        
+        # Log the error if log function is provided
+        if log_message:
+            log_message(error_msg)
+    
+    # Always create a copy of proposals for ESP proposals
+    esp_proposals = proposals.copy()
+    
+    return proposals, esp_proposals, num_iterations
 
 def run_cmd(cmd, capture_output=False, start_new_session=False, input_data=None):
     """Run a command with proper environment sourcing"""
@@ -435,32 +491,17 @@ def main():
     OUTPUT_DIR = "/output"
     NUM_ITERATIONS = args.iterations
     PLUGIN_TIMING_LOG = "/tmp/plugin_timing.csv"
-    config_file = "/etc/swanctl/swanctl.conf"
-
-    proposals = [
-        "aes128-sha256-ecp256",
-        "aes128-sha256-x25519",
-        "aes128-sha256-kyber1",
-        #"aes128-sha256-hqc1",
-        "aes128-sha256-qkd",
-        #"aes128-sha256-qkd_kyber1",
-        #"aes128-sha256-qkd_hqc1",
-    ]
-
-    esp_proposals = [
-        "aes128-sha256-ecp256",
-        "aes128-sha256-x25519",
-        "aes128-sha256-kyber1",
-        #"aes128-sha256-hqc1",
-        "aes128-sha256-qkd",
-        #"aes128-sha256-qkd_hqc1",
-    ]
+    CONFIG_FILE = "/etc/swanctl/swanctl.conf"
+    PROPOSALS_CONFIG_PATH = "/etc/swanctl/shared/proposals_config.yml"
 
     # Ensure output directory exists
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Setup logging
     log_message, log_file = setup_logging(OUTPUT_DIR)
+
+    # Load proposals from configuration file
+    proposals, esp_proposals, NUM_ITERATIONS = load_proposals(PROPOSALS_CONFIG_PATH, args, log_message)
     
     log_message("StrongSwan QKD Plugin Test - Alice Log")
     log_message("====================================")
@@ -479,7 +520,7 @@ def main():
         log_message(f"Testing proposal: {prop}, ESP: {esp_prop}")
         
         # Update configuration
-        update_config(config_file, prop, esp_prop, log_message)
+        update_config(CONFIG_FILE, prop, esp_prop, log_message)
         
         # Start traffic capture
         tshark_proc, ts_res = capture_and_process_traffic(prop, OUTPUT_DIR, log_message)
@@ -549,10 +590,10 @@ def main():
     
     # Cleanup
     log_message("Test completed. Closing connections...")
+    log_message(f"Log saved to {OUTPUT_DIR}/alice_log.txt")
     log_file.close()
     conn.close()
     server_socket.close()
-    log_message(f"Log saved to {OUTPUT_DIR}/alice_log.txt")
 
 if __name__ == "__main__":
     main()
