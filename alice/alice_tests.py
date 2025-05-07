@@ -334,26 +334,24 @@ def process_plugin_timing_data(plugin_timing_log, prop, log_message):
         # Calculate statistics
         total_time_ms = timing_df["time_diff_ms"].sum()
 
-        # Calculate total plugin time (from first creation to last destruction)
+        # For total plugin time calculation
         if algo_count > 0:
-            # Find the earliest creation timestamp and the latest destruction timestamp
-            first_create = (
-                timing_df["create_timestamp"].min() * 1000
-                + timing_df["create_microseconds"].loc[
-                    timing_df["create_timestamp"].idxmin()
-                ]
-                / 1000
+            # Convert both timestamps to milliseconds first
+            create_timestamps_ms = (
+                timing_df["create_timestamp"] * 1000
+                + timing_df["create_microseconds"] / 1000
             )
-            last_destroy = (
-                timing_df["destroy_timestamp"].max() * 1000
-                + timing_df["destroy_microseconds"].loc[
-                    timing_df["destroy_timestamp"].idxmax()
-                ]
-                / 1000
+            destroy_timestamps_ms = (
+                timing_df["destroy_timestamp"] * 1000
+                + timing_df["destroy_microseconds"] / 1000
             )
 
+            # Find the earliest and latest points
+            first_create_ms = create_timestamps_ms.min()
+            last_destroy_ms = destroy_timestamps_ms.max()
+
             # Calculate the total elapsed time
-            total_time_plugin_ms = last_destroy - first_create
+            total_time_plugin_ms = last_destroy_ms - first_create_ms
         else:
             total_time_plugin_ms = 0
 
@@ -423,7 +421,9 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
 
     # Total time inside plugins
     total_time_ms = sum(all_times_ms)
-    avg_time_per_iter_ms = total_time_ms / num_iterations if num_iterations > 0 else 0
+    avg_time_in_plugin_per_iter_ms = (
+        total_time_ms / num_iterations if num_iterations > 0 else 0
+    )
     # Calculate standard deviation for total_time_ms
     if len(all_times_ms) > 1:
         stddev_time_ms = pd.Series(all_times_ms).std()
@@ -432,8 +432,8 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
 
     # Total time between first creation and last destruction
     total_time_plugin_ms = sum(all_plugin_times_ms)
-    avg_time_plugin_ms = (
-        total_time_plugin_ms / total_algorithms if total_algorithms > 0 else 0
+    avg_elapsed_time_per_iter_ms = (
+        total_time_plugin_ms / num_iterations if num_iterations > 0 else 0
     )
     # Calculate standard deviation for total_time_plugin_ms
     if len(all_plugin_times_ms) > 1:
@@ -448,8 +448,8 @@ def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_messa
         "total_algorithms": total_algorithms,
         "total_time_ms": total_time_ms,
         "total_time_plugin_ms": total_time_plugin_ms,
-        "avg_time_per_iter_ms": avg_time_per_iter_ms,
-        "avg_time_plugin_ms": avg_time_plugin_ms,
+        "avg_time_in_plugin_per_iter_ms": avg_time_in_plugin_per_iter_ms,
+        "avg_elapsed_time_per_iter_ms": avg_elapsed_time_per_iter_ms,
         "stddev_time_ms": stddev_time_ms,
         "stddev_plugin_ms": stddev_plugin_ms,
     }
@@ -538,14 +538,14 @@ def generate_report(
                         )
 
                 # Average times with standard deviations
-                if "avg_time_per_iter_ms" in available_cols:
+                if "avg_time_in_plugin_per_iter_ms" in available_cols:
                     report_file.write(
-                        f"Plugin Avg Time Per Iteration: {row['avg_time_per_iter_ms']:.2f} ms\n"
+                        f"Plugin Avg Time Per Iteration: {row['avg_time_in_plugin_per_iter_ms']:.2f} ms\n"
                     )
 
-                if "avg_time_plugin_ms" in available_cols:
+                if "avg_elapsed_time_per_iter_ms" in available_cols:
                     report_file.write(
-                        f"Plugin Avg Time Per Algorithm: {row['avg_time_plugin_ms']:.2f} ms\n"
+                        f"Plugin Avg Time Per Algorithm: {row['avg_elapsed_time_per_iter_ms']:.2f} ms\n"
                     )
 
                 # Average time per operation if we have both pieces of data
@@ -658,7 +658,7 @@ def main():
         # Stop traffic capture
         log_message("Stop tshark...")
         tshark_proc.terminate()
-        time.sleep(1)
+        time.sleep(2)
 
         # Process captured data
         latencies, init_request_count, resp_response_count = process_ike_data(

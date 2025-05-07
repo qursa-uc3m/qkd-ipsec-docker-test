@@ -1,30 +1,44 @@
 #!/usr/bin/env python3
-
-import pandas as pd
-import matplotlib.pyplot as plt
 import sys
 import os
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 from matplotlib import rcParams
+import matplotlib.colors as mcolors
 
 
 # Configure matplotlib styling
 def setup_matplotlib_styling():
-    """Configure matplotlib with consistent styling without LaTeX"""
+    """Configure matplotlib with consistent styling for all visualization types"""
+
     rcParams["text.usetex"] = False
-    rcParams["font.family"] = "serif"
+    rcParams["font.family"] = "sans-serif"
+    rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
     rcParams["font.size"] = 14
     rcParams["axes.titlesize"] = 16
     rcParams["axes.labelsize"] = 14
+    rcParams["axes.titleweight"] = "bold"
+    rcParams["axes.labelweight"] = "bold"
     rcParams["xtick.labelsize"] = 12
     rcParams["ytick.labelsize"] = 12
     rcParams["legend.fontsize"] = 12
     rcParams["figure.titlesize"] = 18
-    rcParams["figure.figsize"] = (10, 6)
+    rcParams["figure.figsize"] = (12, 7)
     rcParams["savefig.dpi"] = 300
     rcParams["savefig.bbox"] = "tight"
     rcParams["savefig.format"] = "pdf"
+
     plt.style.use("seaborn-v0_8-whitegrid")
+
+    # Custom color palette
+    color_palette = list(
+        mcolors.LinearSegmentedColormap.from_list("", ["#9fcf69", "#33acdc"])(
+            np.linspace(0, 1, 9)
+        )
+    )
+
+    return color_palette
 
 
 def load_and_validate_data(csv_file, required_columns):
@@ -70,6 +84,7 @@ def create_bar_chart(
     yerr_column=None,
     log_scale=False,
     annotations=True,
+    color_palette=None,
 ):
     """
     Create a bar chart from DataFrame
@@ -84,10 +99,19 @@ def create_bar_chart(
         log_scale: Whether to use logarithmic scale for y-axis
         annotations: Whether to add value annotations to bars
     """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
     plt.figure(figsize=(12, 7))
     ax = df[y_column].plot(
-        kind="bar", color="skyblue", yerr=df[yerr_column] if yerr_column else None
+        kind="bar",
+        color=color_palette[-1],
+        yerr=df[yerr_column] if yerr_column else None,
+        capsize=5,
+        edgecolor="black",
+        linewidth=1,
     )
+
     plt.title(title)
     plt.ylabel(ylabel)
     plt.xlabel("Proposal")
@@ -101,19 +125,28 @@ def create_bar_chart(
     # Add value annotations if requested
     if annotations:
         for i, v in enumerate(df[y_column]):
-            text = f"{v:.2f}"
+            # Format text with value and uncertainty on same line
             if yerr_column:
-                text += f"\n±{df[yerr_column].iloc[i]:.2f}"
+                text = f"{v:.2f} ± {df[yerr_column].iloc[i]:.2f}"
+            else:
+                text = f"{v:.2f}"
 
             # Adjust position based on scale type
             if log_scale:
-                y_pos = v * 1.1  # Multiplicative position for log scale
+                y_pos = v * 1.3  # Multiplicative position for log scale
             else:
                 y_pos = v + (
-                    max(df[y_column]) * 0.02
+                    max(df[y_column]) * 0.05
                 )  # Additive position for linear scale
 
-            ax.text(i, y_pos, text, horizontalalignment="center", fontsize=9)
+            ax.text(
+                i,
+                y_pos,
+                text,
+                horizontalalignment="center",
+                fontsize=11,
+                fontweight="bold",
+            )
 
     plt.savefig(output_path)
     plt.close()
@@ -131,8 +164,7 @@ def create_grouped_bar_chart(
     yerr1_column=None,
     yerr2_column=None,
     log_scale=False,
-    color1="cornflowerblue",
-    color2="lightcoral",
+    color_palette=None,
 ):
     """Create a grouped bar chart comparing two metrics"""
     x = np.arange(len(df.index))
@@ -140,13 +172,17 @@ def create_grouped_bar_chart(
 
     fig, ax = plt.subplots(figsize=(12, 7))
 
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
     # Plot first set of bars
     rects1 = ax.bar(
         x - width / 2,
         df[y1_column],
         width,
         label=y1_label,
-        color=color1,
+        color=color_palette[0],
+        edgecolor="black",
         yerr=df[yerr1_column] if yerr1_column else None,
     )
 
@@ -156,7 +192,8 @@ def create_grouped_bar_chart(
         df[y2_column],
         width,
         label=y2_label,
-        color=color2,
+        color=color_palette[-1],
+        edgecolor="black",
         yerr=df[yerr2_column] if yerr2_column else None,
     )
 
@@ -207,9 +244,11 @@ def create_statistics_table(df, output_path):
     # Extract key metrics for table
     table_data = pd.DataFrame(
         {
-            "Avg Time (ms)": df["avg_time_per_iter_ms"],
+            "Avg Time (ms)": df["avg_time_in_plugin_per_iter_ms"],
             "Std Dev (ms)": df["stddev_time_ms"],
-            "CoV (%)": (df["stddev_time_ms"] / df["avg_time_per_iter_ms"] * 100),
+            "CoV (%)": (
+                df["stddev_time_ms"] / df["avg_time_in_plugin_per_iter_ms"] * 100
+            ),
         }
     )
 
@@ -267,40 +306,40 @@ def generate_report(df, stats, output_path, log_scale=False, has_stddev=False):
         f.write("\n\n")
 
         # Compare proposals for average time per iteration
-        best_proposal = df["avg_time_per_iter_ms"].idxmin()
-        worst_proposal = df["avg_time_per_iter_ms"].idxmax()
+        best_proposal = df["avg_time_in_plugin_per_iter_ms"].idxmin()
+        worst_proposal = df["avg_time_in_plugin_per_iter_ms"].idxmax()
 
         f.write(f"Fastest proposal (lowest avg time): {best_proposal}\n")
         f.write(
-            f"Average time per iteration: {df.loc[best_proposal, 'avg_time_per_iter_ms']:.3f} ms\n"
+            f"Average time per iteration: {df.loc[best_proposal, 'avg_time_in_plugin_per_iter_ms']:.3f} ms\n"
         )
         if has_stddev:
             f.write(
                 f"Standard deviation: {df.loc[best_proposal, 'stddev_time_ms']:.3f} ms\n"
             )
             f.write(
-                f"Coefficient of variation: {(df.loc[best_proposal, 'stddev_time_ms'] / df.loc[best_proposal, 'avg_time_per_iter_ms'] * 100):.2f}%\n"
+                f"Coefficient of variation: {(df.loc[best_proposal, 'stddev_time_ms'] / df.loc[best_proposal, 'avg_time_in_plugin_per_iter_ms'] * 100):.2f}%\n"
             )
         f.write("\n")
 
         f.write(f"Slowest proposal (highest avg time): {worst_proposal}\n")
         f.write(
-            f"Average time per iteration: {df.loc[worst_proposal, 'avg_time_per_iter_ms']:.3f} ms\n"
+            f"Average time per iteration: {df.loc[worst_proposal, 'avg_time_in_plugin_per_iter_ms']:.3f} ms\n"
         )
         if has_stddev:
             f.write(
                 f"Standard deviation: {df.loc[worst_proposal, 'stddev_time_ms']:.3f} ms\n"
             )
             f.write(
-                f"Coefficient of variation: {(df.loc[worst_proposal, 'stddev_time_ms'] / df.loc[worst_proposal, 'avg_time_per_iter_ms'] * 100):.2f}%\n"
+                f"Coefficient of variation: {(df.loc[worst_proposal, 'stddev_time_ms'] / df.loc[worst_proposal, 'avg_time_in_plugin_per_iter_ms'] * 100):.2f}%\n"
             )
         f.write("\n")
 
         # Performance comparison
         if worst_proposal != best_proposal:
             perf_ratio = (
-                df.loc[worst_proposal, "avg_time_per_iter_ms"]
-                / df.loc[best_proposal, "avg_time_per_iter_ms"]
+                df.loc[worst_proposal, "avg_time_in_plugin_per_iter_ms"]
+                / df.loc[best_proposal, "avg_time_in_plugin_per_iter_ms"]
             )
             f.write(f"Performance ratio (slowest/fastest): {perf_ratio:.2f}x\n\n")
 
@@ -311,13 +350,13 @@ def generate_report(df, stats, output_path, log_scale=False, has_stddev=False):
 def analyze_results(csv_file, output_dir="analysis", log_scale=False):
     """Main analysis function"""
     # Set up matplotlib styling
-    setup_matplotlib_styling()
+    color_palette = setup_matplotlib_styling()
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
     # Define required columns
-    required_columns = ["proposal", "avg_time_per_iter_ms"]
+    required_columns = ["proposal", "avg_time_in_plugin_per_iter_ms"]
 
     # Load and validate data
     df = load_and_validate_data(csv_file, required_columns)
@@ -339,58 +378,36 @@ def analyze_results(csv_file, output_dir="analysis", log_scale=False):
     avg_time_chart_path = f"{output_dir}/avg_time_per_iter.pdf"
     create_bar_chart(
         df,
-        "avg_time_per_iter_ms",
+        "avg_elapsed_time_per_iter_ms",
         "Average Time per Iteration by Proposal",
         "Time (milliseconds)",
         avg_time_chart_path,
         "stddev_time_ms" if has_stddev else None,
-        log_scale,
+        log_scale=log_scale,
+        color_palette=color_palette,
     )
     visualizations.append(
         f"1. {avg_time_chart_path} - Average time per iteration across proposals"
     )
 
-    # 2. Create timing metrics comparison if available
-    if all(col in df.columns for col in ["avg_time_per_iter_ms", "avg_time_plugin_ms"]):
-        comparison_chart_path = f"{output_dir}/timing_metrics_comparison.pdf"
-        create_grouped_bar_chart(
-            df,
-            "avg_time_per_iter_ms",
-            "avg_time_plugin_ms",
-            "Avg Time per Iteration",
-            "Avg Time per Algorithm",
-            "Comparison of Average Timing Metrics with Standard Deviation",
-            "Time (milliseconds)",
-            comparison_chart_path,
-            "stddev_time_ms" if has_stddev else None,
-            "stddev_plugin_ms" if has_stddev else None,
-            log_scale,
-        )
-        visualizations.append(
-            f"2. {comparison_chart_path} - Comparison of average timing metrics"
-        )
-
-    # 3. Create total timing metrics comparison if available
+    # 2. Create total timing metrics comparison if available
     if all(col in df.columns for col in ["total_time_ms", "total_time_plugin_ms"]):
         total_chart_path = f"{output_dir}/total_timing_metrics.pdf"
         create_grouped_bar_chart(
             df,
-            "total_time_ms",
-            "total_time_plugin_ms",
-            "Total Sum of Times",
-            "Total Plugin Time (First to Last)",
-            "Total Time Metrics by Proposal",
+            "avg_elapsed_time_per_iter_ms",
+            "avg_time_in_plugin_per_iter_ms",
+            "Average Time (First to Last)",
+            "Average Plugin Time",
+            "Time Metrics by Proposal",
             "Time (milliseconds)",
             total_chart_path,
             None,
             None,  # No error bars for totals
             log_scale,
-            "darkblue",
-            "darkred",
+            color_palette=color_palette,
         )
-        visualizations.append(
-            f"3. {total_chart_path} - Total timing metrics by proposal"
-        )
+        visualizations.append(f"3. {total_chart_path} - Timing metrics by proposal")
 
     # 4. Create statistics table if standard deviation available
     if has_stddev:
