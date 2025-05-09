@@ -38,24 +38,10 @@ fi
 export ETSI_API_VERSION=004
 export QKD_BACKEND=python_client
 
-
-# Remove and recreate the network
-echo "Setting up qkd_network..."
-docker network rm qkd_network 2>/dev/null || true
-docker network create qkd_network 2>/dev/null || true
-
 # Clone the ETSI QKD 004 repository if not already done
 if [ ! -d "etsi-qkd-004" ]; then
     echo "Cloning ETSI QKD 004 repository..."
     git clone https://github.com/QUBIP/etsi-qkd-004.git -b ksid_sync
 fi
-
-# Start the QUBIP ETSI 004 infrastructure
-echo "Starting QUBIP ETSI 004 infrastructure..."
-docker-compose -f qkd-etsi004.yml up -d --build
-
-# Wait for the QUBIP infrastructure to be ready
-echo "Waiting for QUBIP servers to be ready..."
-sleep 5
 
 echo "ETSI 004 environment is ready!"

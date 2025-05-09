@@ -1,4 +1,67 @@
 services:
+
+  strongswan-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_QKD_ETSI: "true"
+        BUILD_QKD_KEM: "true"
+        QKD_BACKEND: ${QKD_BACKEND:-simulated}
+        ACCOUNT_ID: ${ACCOUNT_ID:-}
+        ETSI_API_VERSION: ${ETSI_API_VERSION:-014}
+    image: strongswan-base:latest
+    container_name: strongswan-base
+    
+  bob:
+    image: strongswan-base:latest
+    container_name: bob
+    depends_on:
+      - strongswan-base
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
+    volumes:
+      - ./bob:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
+      - ./strongswan.conf:/etc/strongswan.conf
+      - ./results:/output
+      - ./qkd_certs:/qkd_certs
+    networks:
+      internet:
+        ipv4_address: 172.30.0.2
+      intranet:
+        ipv4_address: 172.31.0.2
+        
+  alice:
+    image: strongswan-base:latest
+    container_name: alice
+    depends_on:
+      - strongswan-base
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
+    volumes:
+      - ./alice:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
+      - ./strongswan.conf:/etc/strongswan.conf
+      - ./results:/output
+      - ./qkd_certs:/qkd_certs
+    networks:
+      internet:
+        ipv4_address: 172.30.0.3
+
+  # QKD Servers
   qkd_server_alice:
     build:
       context: ./etsi-qkd-004/server
@@ -24,7 +87,8 @@ services:
     ports:
       - "25575:25575"
     networks:
-      - qkd_network
+      internet:
+        ipv4_address: 172.30.0.10
 
   qkd_server_bob:
     build:
@@ -51,7 +115,8 @@ services:
     ports:
       - "25576:25576"
     networks:
-      - qkd_network
+      internet:
+        ipv4_address: 172.30.0.11
 
   generate_key_alice:
     build:
@@ -67,7 +132,8 @@ services:
     volumes:
       - qkd_shared_alice:/dev/shm
     networks:
-      - qkd_network
+      internet:
+        ipv4_address: 172.30.0.12
 
   generate_key_bob:
     build:
@@ -84,11 +150,20 @@ services:
     ports:
       - "5000:5000"
     networks:
-      - qkd_network
+      internet:
+        ipv4_address: 172.30.0.13
 
 networks:
-  qkd_network:
-    external: true
+  internet:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/24
+  intranet:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.31.0.0/16
 
 volumes:
   qkd_shared_alice:
