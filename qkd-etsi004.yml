@@ -1,0 +1,101 @@
+services:
+  qkd_server_alice:
+    build:
+      context: ./etsi-qkd-004/server
+    container_name: qkd_server_alice
+    environment:
+      - SERVER_CERT_PEM=/certs/server_cert_qkd_server_alice.pem
+      - SERVER_CERT_KEY=/certs/server_key_qkd_server_alice.pem
+      - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_alice.pem
+      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_PORT=25575
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_SIZE=1000000
+      - QOS_KEY_CHUNK_SIZE=32
+      - QOS_MAX_BPS=40000
+      - QOS_MIN_BPS=5000
+      - QOS_JITTER=10
+      - QOS_PRIORITY=0
+      - QOS_TIMEOUT=5000
+      - QOS_TTL=3600
+    volumes:
+      - ./qkd_certs/etsi004:/certs
+      - qkd_shared_alice:/dev/shm
+    ports:
+      - "25575:25575"
+    networks:
+      - qkd_network
+
+  qkd_server_bob:
+    build:
+      context: ./etsi-qkd-004/server
+    container_name: qkd_server_bob
+    environment:
+      - SERVER_CERT_PEM=/certs/server_cert_qkd_server_bob.pem
+      - SERVER_CERT_KEY=/certs/server_key_qkd_server_bob.pem
+      - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_bob.pem
+      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_PORT=25576
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_SIZE=1000000
+      - QOS_KEY_CHUNK_SIZE=32
+      - QOS_MAX_BPS=40000
+      - QOS_MIN_BPS=5000
+      - QOS_JITTER=10
+      - QOS_PRIORITY=0
+      - QOS_TIMEOUT=5000
+      - QOS_TTL=3600
+    volumes:
+      - ./qkd_certs/etsi004:/certs
+      - qkd_shared_bob:/dev/shm
+    ports:
+      - "25576:25576"
+    networks:
+      - qkd_network
+
+  generate_key_alice:
+    build:
+      context: ./etsi-qkd-004/keys
+    container_name: generate_key_alice
+    environment:
+      - BUFFER_SIZE=1000000
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - MODE=sender
+      - HOST=generate_key_bob
+      - PORT=5000
+      - SKR=12500
+    volumes:
+      - qkd_shared_alice:/dev/shm
+    networks:
+      - qkd_network
+
+  generate_key_bob:
+    build:
+      context: ./etsi-qkd-004/keys
+    container_name: generate_key_bob
+    environment:
+      - BUFFER_SIZE=1000000
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - MODE=receiver
+      - PORT=5000
+      - SKR=12500
+    volumes:
+      - qkd_shared_bob:/dev/shm
+    ports:
+      - "5000:5000"
+    networks:
+      - qkd_network
+
+networks:
+  qkd_network:
+    external: true
+
+volumes:
+  qkd_shared_alice:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  qkd_shared_bob:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

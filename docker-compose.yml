@@ -8,8 +8,10 @@ services:
         BUILD_QKD_KEM: "true"
         QKD_BACKEND: ${QKD_BACKEND:-simulated}
         ACCOUNT_ID: ${ACCOUNT_ID:-}
+        ETSI_API_VERSION: ${ETSI_API_VERSION:-014}
     image: strongswan-base:latest
     container_name: strongswan-base
+    
   bob:
     image: strongswan-base:latest
     container_name: bob
@@ -21,16 +23,20 @@ services:
       - SYS_MODULE
     stdin_open: true
     tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
     volumes:
       - ./bob:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
       - ./strongswan.conf:/etc/strongswan.conf
       - ./results:/output
+      - ./qkd_certs:/qkd_certs
     networks:
       internet:
-        ipv4_address: 172.30.0.2  # Changed from 192.168.0.2
+        ipv4_address: 172.30.0.2
       intranet:
-        ipv4_address: 172.31.0.2  # Changed from 10.1.0.2
+        ipv4_address: 172.31.0.2
+        
   alice:
     image: strongswan-base:latest
     container_name: alice
@@ -42,22 +48,27 @@ services:
       - SYS_MODULE
     stdin_open: true
     tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
     volumes:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
       - ./strongswan.conf:/etc/strongswan.conf
       - ./results:/output
+      - ./qkd_certs:/qkd_certs
     networks:
       internet:
-        ipv4_address: 172.30.0.3  # Changed from 192.168.0.3
+        ipv4_address: 172.30.0.3
+
 networks:
   internet:
     ipam:
       driver: default 
       config:
-        - subnet: 172.30.0.0/24  # Changed from 192.168.0.0/24
+        - subnet: 172.30.0.0/24
+    name: qkd_network
   intranet:
     ipam:
       driver: default
       config:
-        - subnet: 172.31.0.0/16  # Changed from 10.1.0.0/16
+        - subnet: 172.31.0.0/16

@@ -6,6 +6,7 @@ ARG BUILD_QKD_ETSI=true
 ARG BUILD_QKD_KEM=false
 ARG QKD_BACKEND=simulated
 ARG ACCOUNT_ID=
+ARG ETSI_API_VERSION=014
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,6 +16,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/ossl-modules
 # Pass build args to env vars
 ENV QKD_BACKEND=${QKD_BACKEND}
 ENV ACCOUNT_ID=${ACCOUNT_ID}
+ENV ETSI_API_VERSION=${ETSI_API_VERSION}
 
 # Install build dependencies and testing tools
 RUN apt-get update && apt-get install -y \
@@ -74,7 +76,11 @@ RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
     fi
 
 # Build QKD KEM provider if requested
-RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
+# For ETSI 004, we momentarily skip QKD-KEM provider build
+RUN if [ "$ETSI_API_VERSION" = "004" ]; then \
+        echo "ETSI 004 detected. Building only liboqs..."; \
+        /build_liboqs.sh; \
+    elif [ "$BUILD_QKD_KEM" = "true" ]; then \
         git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
         /build_qkd_kem_provider.sh; \
     else \

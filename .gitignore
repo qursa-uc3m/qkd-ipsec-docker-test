@@ -22,3 +22,6 @@ analysis_*/
 *.pdf
 *.csv
 .old
+
+# QUBIP etsi-qkd-004
+/etsi-qkd-004/*

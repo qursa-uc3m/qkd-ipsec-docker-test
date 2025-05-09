@@ -79,17 +79,60 @@ If you've previously run the containers, you may want to clean your Docker envir
 sudo docker system prune -a --volumes
 ```
 
+### Selecting the ETSI API Version
+
+The QKD integration supports two different ETSI API specifications:
+
+- **ETSI 014** (default): REST-based key delivery API
+- **ETSI 004**: Application Interface for traditional QKD systems
+
+To select which API version to use:
+
+1. Set the `ETSI_API_VERSION` environment variable:
+
+   ```bash
+   # For ETSI 004
+   export ETSI_API_VERSION=004
+   
+   # For ETSI 014 (default)
+   export ETSI_API_VERSION=014
+   # Or don't set it to use the default
+   ```
+
+### Using ETSI 004 with QUBIP
+
+For ETSI 004 testing, we use QUBIP's ETSI-QKD-004 implementation to provide QKD server functionality. This setup is separated into two Docker Compose files for better organization:
+
+1. `docker-compose.yml`: Contains the StrongSwan IPSec setup
+2. `qkd-etsi004.yml`: Contains the QUBIP ETSI 004 servers and key generators
+
+### Starting the ETSI 004 Environment
+
+To quickly start the complete ETSI 004 environment:
+
+```bash
+./scripts/start-etsi004.sh
+```
+
 ### Building and Launching Containers
 
 Build and launch containers (in this example we use QuKayDee cloud-based QKD network simulator):
 
 ```bash
-QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml build --no-cache && QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml up
+ETSI_API_VERSION=014 QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml build --no-cache && \
+ETSI_API_VERSION=014 QKD_BACKEND=qukaydee ACCOUNT_ID=<your_account_id> docker-compose -f docker-compose.yml up
 ```
 
 Replace `<your_account_id>` with your actual QuKayDee account ID. The environment will automatically use the certificates in your `qkd_certs` directory as specified in the configuration script.
 
 [Configuring the QuKayDee environment](/home/javi/Documents/apps/QURSA/qkd-kem-provider/qkd_certs)
+
+or for the ETSI 004 API:
+
+```bash
+ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.yml build --no-cache && \
+ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.yml up
+```
 
 ## Running Tests
 

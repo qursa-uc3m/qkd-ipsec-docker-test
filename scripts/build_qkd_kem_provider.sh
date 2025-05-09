@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+
 # Create the OpenSSL modules directory if it doesn't exist
 mkdir -p /usr/local/lib/ossl-modules
 
@@ -10,6 +11,7 @@ git clone --depth 1 --branch $LIBOQS_BRANCH https://github.com/open-quantum-safe
 cd /tmp/liboqs
 mkdir -p build
 cd build
+
 cmake -GNinja \
     -DOQS_USE_OPENSSL=ON \
     -DBUILD_SHARED_LIBS=ON \
@@ -17,6 +19,7 @@ cmake -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DOQS_BUILD_ONLY_LIB=ON \
     ..
+
 ninja
 ninja install
 cd /
@@ -27,8 +30,10 @@ cd /qkd-kem-provider
 chmod +x scripts/fullbuild.sh
 
 # Skip liboqs build since we've already installed it
-export liboqs_DIR=/usr  # Tell the build script to use system installed liboqs
-export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=ON"
+export liboqs_DIR=/usr
+
+# Tell the build script to use system installed liboqs
+export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=ON -DQKD_BACKEND=${QKD_BACKEND:-simulated}"
 
 # Build the provider - but only clean the provider build, not liboqs
 ./scripts/fullbuild.sh -f
