@@ -101,7 +101,7 @@ To select which API version to use:
 
 ### Using ETSI 004 with QUBIP
 
-For ETSI 004 testing, we use QUBIP's ETSI-QKD-004 implementation to provide QKD server functionality. This setup is separated into two Docker Compose files for better organization:
+For ETSI 004 testing, we use [QUBIP's ETSI-QKD-004 simulation](https://github.com/QUBIP/etsi-qkd-004/tree/ksid_sync) to provide QKD server functionality. This setup is separated into two Docker Compose files for better organization:
 
 1. `docker-compose.yml`: Contains the StrongSwan IPSec setup
 2. `qkd-etsi004.yml`: Contains the QUBIP ETSI 004 servers and key generators
@@ -111,8 +111,15 @@ For ETSI 004 testing, we use QUBIP's ETSI-QKD-004 implementation to provide QKD 
 To quickly start the complete ETSI 004 environment:
 
 ```bash
-./scripts/start-etsi004.sh
+./scripts/start_etsi004.sh
 ```
+
+This script:
+
+- Creates the necessary ETSI 004 certificate directory
+- Generates certificates for `qkd_server_alice` and `qkd_server_bob`
+- Sets up the proper environment variables
+- Clones the QUBIP ETSI-QKD-004 repository if not already done
 
 ### Building and Launching Containers
 
@@ -130,8 +137,8 @@ Replace `<your_account_id>` with your actual QuKayDee account ID. The environmen
 or for the ETSI 004 API:
 
 ```bash
-ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.yml build --no-cache && \
-ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.yml up
+ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.004.yml build --no-cache && \
+ETSI_API_VERSION=004 QKD_BACKEND=python_client docker-compose -f docker-compose.004.yml up
 ```
 
 ## Running Tests
