@@ -26,10 +26,6 @@ if [ "${ETSI_API_VERSION}" = "004" ]; then
     export SERVER_PORT=${SERVER_PORT:-25576}
     export CLIENT_ADDRESS=${CLIENT_ADDRESS:-"qkd_server_alice"}
     
-    # Additional QKD server settings for StrongSwan
-    export QKD_SERVER_ALICE=${QKD_SERVER_ALICE:-"qkd_server_alice:25575"}
-    export QKD_SERVER_BOB=${QKD_SERVER_BOB:-"qkd_server_bob:25576"}
-    
     # Certificate paths for ETSI 004 (original variable names)
     export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"}
     export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"}
