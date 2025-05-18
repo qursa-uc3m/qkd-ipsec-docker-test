@@ -1,4 +1,4 @@
-# Base image 
+# Base image
 FROM ubuntu:22.04
 
 # Build argument for QKD support
@@ -76,16 +76,12 @@ RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
     fi
 
 # Build QKD KEM provider if requested
-# For ETSI 004, we momentarily skip QKD-KEM provider build
-RUN if [ "$ETSI_API_VERSION" = "004" ]; then \
-        echo "ETSI 004 detected. Building only liboqs..."; \
-        /build_liboqs.sh; \
-    elif [ "$BUILD_QKD_KEM" = "true" ]; then \
-        git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
-        /build_qkd_kem_provider.sh; \
-    else \
-        /build_liboqs.sh; \
-    fi
+RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
+    git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+    ETSI_API_VERSION=${ETSI_API_VERSION} /build_qkd_kem_provider.sh; \
+else \
+    /build_liboqs.sh; \
+fi
 
 # Install Python and required packages
 RUN apt-get update && apt-get install -y \
@@ -100,12 +96,35 @@ RUN pip3 install pandas pyyaml
 # Create directory for output
 RUN mkdir -p /output
 
-# Create strongSwan directory and copy local source
-WORKDIR /strongswan
-COPY ./strongswan/ .
+# Clone and build StrongSwan from GitHub using 6.0.0beta6 tag
+WORKDIR /
+RUN git clone https://github.com/strongswan/strongswan.git /strongswan && \
+    cd /strongswan && \
+    git checkout 6.0.0beta6 && \
+    cd /
 
-# Build strongSwan from local directory
+# Build strongSwan using the script
+WORKDIR /strongswan
 RUN /build_strongswan.sh
+
+# Clone and build external QKD plugins from GitHub
+WORKDIR /
+RUN git clone https://github.com/qursa-uc3m/qkd-plugins-strongswan.git /qkd-plugins-strongswan && \
+    cd /qkd-plugins-strongswan && \
+    git checkout ${QKD_PLUGINS_BRANCH}
+
+WORKDIR /qkd-plugins-strongswan
+RUN autoreconf -i && \
+    ./configure \
+    --with-strongswan-headers=/usr/include/strongswan \
+    --with-plugin-dir=/usr/lib/ipsec/plugins \
+    --with-qkd-etsi-api=/usr/local \
+    --with-qkd-kem-provider=/usr/local/lib/ossl-modules \
+    --with-etsi-api-version=${ETSI_API_VERSION} \
+    --enable-qkd \
+    $([ "$BUILD_QKD_KEM" = "true" ] && echo "--enable-qkd-kem" || echo "--disable-qkd-kem") \
+    && make \
+    && make install
 
 # Create symlink for charon daemon
 RUN ln -s /usr/libexec/ipsec/charon /charon

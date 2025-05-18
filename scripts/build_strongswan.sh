@@ -35,6 +35,7 @@ echo "Build flags: $BUILD_FLAGS"
 ./configure \
     --prefix=/usr \
     --sysconfdir=/etc \
+    --with-dev-headers=/usr/include/strongswan \
     --disable-defaults \
     --enable-charon \
     --enable-ikev2 \
@@ -57,8 +58,6 @@ echo "Build flags: $BUILD_FLAGS"
     --enable-eap-tls \
     --enable-updown \
     --enable-vici \
-    --enable-qkd \
-    --enable-qkd-kem \
     --enable-silent-rules \
     $BUILD_FLAGS \
     LDFLAGS="-luuid -L/usr/local/lib"
