@@ -68,6 +68,7 @@ RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
 # Copy build and environment scripts
 COPY scripts/build_*.sh /
 COPY scripts/set_env.sh /
+COPY scripts/add_timing_hooks.py /
 RUN chmod +x /build_*.sh /set_env.sh
 
 # Build QKD ETSI API
@@ -102,6 +103,9 @@ RUN git clone https://github.com/strongswan/strongswan.git /strongswan && \
     cd /strongswan && \
     git checkout 6.0.0beta6 && \
     cd /
+
+# Apply timing hooks to strongSwan
+RUN python3 /add_timing_hooks.py /strongswan
 
 # Build strongSwan using the script
 WORKDIR /strongswan
