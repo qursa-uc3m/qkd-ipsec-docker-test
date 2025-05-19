@@ -1,17 +1,15 @@
 # QKD-IPSec Docker Testing Environment
 
-> **IMPORTANT NOTE:** The [qursa-uc3m strongSwan](https://github.com/qursa-uc3m/strongswan) repository (<https://github.com/qursa-uc3m/strongswan>) is temporarily unavailable. Since this repository is required during the Docker build process, the environment cannot be built until the repository is restored. We expect it to be available again soon. Please check back later.
-
-This repository contains a testing environment for our QKD-enabled strongSwan [fork](https://github.com/qursa-uc3m/strongswan/tree/qkd) which integrates Quantum Key Distribution into (in substitution of the) the IKEv2 protocol. The setup uses Docker containers to simulate a client-server (Alice-Bob) environment for testing secure communication channels.
+This repository contains a testing environment for StrongSwan with [our QKD plugins](https://github.com/qursa-uc3m/qkd-plugins-strongswan) that modify the IKEv2 protocol. The setup uses Docker containers to simulate a client-server (Alice-Bob) environment for testing secure communication channels.
 
 The testing environment is derived from the [strongX509/docker](https://github.com/strongX509/docker) project and modified to support our QKD integration testing.
 
 ## Setting the QKD Plugin
 
-The [qursa-uc3m/strongswan](https://github.com/qursa-uc3m/strongswan/tree/qkd) strongSwan fork includes two plugins:
+The [qursa-uc3m/qkd-plugins-strongswan](https://github.com/qursa-uc3m/qkd-plugins-strongswan) plugins include two plugins:
 
-- **QKD-KEM Plugin**: Hybridizes QKD with Post-Quantum Cryptography using the [QKD-KEM Provider](https://github.com/qursa-uc3m/qkd-kem-provider), which depends on the [QKD-ETSI API](https://github.com/qursa-uc3m/qkd-etsi-api).
 - **QKD Plugin**: Implements bare QKD integration.
+- **QKD-KEM Plugin**: Hybridizes QKD with Post-Quantum Cryptography using the [QKD-KEM Provider](https://github.com/qursa-uc3m/qkd-kem-provider), which depends on the [QKD-ETSI API](https://github.com/qursa-uc3m/qkd-etsi-api).
 
 To test a specific plugin:
 
