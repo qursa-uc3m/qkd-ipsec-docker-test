@@ -19,6 +19,12 @@ def parse_arguments():
         default=3,
         help="Number of test iterations to run (default: 3)",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="/output",
+        help="Directory for storing output files (default: /output)",
+    )
     return parser.parse_args()
 
 
@@ -599,7 +605,7 @@ def main():
     HOST = "0.0.0.0"
     PORT = 12345
     global OUTPUT_DIR
-    OUTPUT_DIR = "/output"
+    OUTPUT_DIR = args.output_dir
     NUM_ITERATIONS = args.iterations
     PLUGIN_TIMING_LOG = "/tmp/plugin_timing.csv"
     CONFIG_FILE = "/etc/swanctl/swanctl.conf"

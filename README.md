@@ -181,7 +181,7 @@ swanctl --initiate --child net
 
 If you run Wireshark before initiating the connection and filter for IKEv2 traffic with the filter `udp.port==500 || udp.port==4500` you should see the IKEv2 exchange.
 
-## Testing Suite
+## Automated Testing
 
 This repository includes an automated performance testing framework to benchmark and compare different cryptographic proposal combinations for StrongSwan's QKD integration. We have implemented the following components:
 
@@ -189,25 +189,62 @@ This repository includes an automated performance testing framework to benchmark
 - **Orchestration**: Shell script to coordinate test execution
 - **Analysis**: Python script to process results and generate visualizations
 
-### Running the Benchmark Suite
+### Network Condition Simulation
 
-To execute the complete benchmark test suite for (e.g. the QuKayDee service):
+Our testing framework uses [Pumba](https://github.com/alexei-led/pumba) to simulate network conditions during tests. This allows us to evaluate QKD performance under various scenarios:
+
+- **Latency**: Adds delay to network packets (measured in milliseconds)
+- **Jitter**: Variability in packet latency (measured in milliseconds)
+- **Packet Loss**: Percentage of packets that will be dropped
+
+**These network conditions are applied to the communication between Alice and Bob during the tests, but not to their respective communication with the QKD nodes**. This allows us to isolate the performance of the QKD integration from the network conditions.
+
+These conditions can be adjusted using command-line parameters when running the test script `run_tests.sh`. The parameters are:
+
+| Parameter | Description | Default | Example Values |
+|-----------|-------------|---------|---------------|
+| `--latency` | Network delay in milliseconds | 100 | 0, 50, 100, 200 |
+| `--jitter` | Latency variation in milliseconds | 0 | 0, 5, 10, 20 |
+| `--packet-loss` | Percentage of dropped packets | 5 | 0, 1, 5, 10 |
+| `--no-network-conditions` | Disable network condition simulation | | |
+
+So, for example, to run the tests with a latency of 200ms, a jitter of 10ms, and a packet loss of 10%, you can use:
 
 ```bash
-# 1. Set required environment variables
-export QKD_BACKEND=qukaydee
-export ACCOUNT_ID=<your_account_id>
-
-# 2. Build and start containers (if not already running)
-docker-compose -f docker-compose.yml build
-docker-compose -f docker-compose.yml up -d
-
-# 3. Run the performance tests
-./run_tests.sh
-
-# 4. Analyze the results
-python3 analyze_results.py
+./run_tests.sh --latency 200 --jitter 10 --packet-loss 10
 ```
+
+or to test without any network conditions:
+
+```bash
+./run_tests.sh --no-network-conditions
+```
+
+### Running the Benchmarks
+
+To execute the complete benchmark test suite (using QuKayDee service as an example):
+
+1. Set required environment variables:
+
+   ```bash
+   # 1. Set required environment variables
+   export ETSI_API_VERSION=014
+   export QKD_BACKEND=qukaydee
+   export ACCOUNT_ID=<your_account_id> # Required by QuKayDee
+   ```
+
+2. Build and start containers (if not already running):
+
+   ```bash
+   docker-compose -f docker-compose.yml build
+   docker-compose -f docker-compose.yml up -d
+   ```
+
+3. Run the performance tests
+
+   ```bash
+   ./run_tests.sh --iterations 20 --latency 100 --packet-loss 5
+   ```
 
 ### What Gets Measured
 
@@ -223,6 +260,21 @@ Test results are stored in two locations:
 
 - **Raw data**: Generated in the `results/` directory
 - **Analysis output**: Visualizations and reports in the `analysis/` directory
+
+```
+results/
+├── <etsi_api_version>/                    # e.g., 014 or 004
+│   ├── <qkd_backend>/                     # e.g., qukaydee, cerberis-xgr
+│   │   ├── lat<latency>_jit<value>_loss<packet-loss>_iter<iterations>_time<timestamp>/
+│   │   │   ├── test_config.json           # Test parameters
+│   │   │   ├── alice_log.txt              # Alice's log output
+│   │   │   ├── bob_log.txt                # Bob's log output
+│   │   │   ├── capture*.pcap             # Network captures per proposal
+│   │   │   ├── latencies.csv              # Handshake latency measurements
+│   │   │   ├── counters.csv               # Request/response counts
+│   │   │   ├── plugin_timing_summary.csv  # Plugin timing data
+│   │   │   └── report.txt                 # Summary report
+```
 
 The analysis includes:
 
@@ -275,19 +327,7 @@ To test different cryptographic proposals:
    You can modify the proposals by adding or removing items from these lists. Both Alice and Bob will automatically use the same configuration.
    For enabling intermediate IKEv2 handshakes in Strongswan, you must use a `ke1_`, `ke2_`, etc. prefix before the desired curve/qkd/kem name. The number indicates the step order.
 
-3. Restart the containers:
-
-   ```bash
-   docker-compose -f docker-compose.yml up -d
-   ```
-
-4. Run the tests again:
-
-   ```bash
-   ./run_tests.sh
-   ```
-
-This approach ensures a clean environment for each test run and prevents any state from previous tests from affecting new results.
+3. Run the tests as explained above.
 
 ### Important Notes
 
