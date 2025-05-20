@@ -7,6 +7,7 @@ ARG BUILD_QKD_KEM=false
 ARG QKD_BACKEND=simulated
 ARG ACCOUNT_ID=
 ARG ETSI_API_VERSION=014
+ARG STRONGSWAN_VERSION=6.0.0beta6
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,6 +18,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/ossl-modules
 ENV QKD_BACKEND=${QKD_BACKEND}
 ENV ACCOUNT_ID=${ACCOUNT_ID}
 ENV ETSI_API_VERSION=${ETSI_API_VERSION}
+ENV STRONGSWAN_VERSION=${STRONGSWAN_VERSION}
 
 # Install build dependencies and testing tools
 RUN apt-get update && apt-get install -y \
@@ -101,7 +103,7 @@ RUN mkdir -p /output
 WORKDIR /
 RUN git clone https://github.com/strongswan/strongswan.git /strongswan && \
     cd /strongswan && \
-    git checkout 6.0.0beta6 && \
+    git checkout ${STRONGSWAN_VERSION} && \
     cd /
 
 # Apply timing hooks to strongSwan
@@ -114,8 +116,7 @@ RUN /build_strongswan.sh
 # Clone and build external QKD plugins from GitHub
 WORKDIR /
 RUN git clone https://github.com/qursa-uc3m/qkd-plugins-strongswan.git /qkd-plugins-strongswan && \
-    cd /qkd-plugins-strongswan && \
-    git checkout ${QKD_PLUGINS_BRANCH}
+    cd /qkd-plugins-strongswan
 
 WORKDIR /qkd-plugins-strongswan
 RUN autoreconf -i && \

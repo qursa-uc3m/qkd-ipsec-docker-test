@@ -119,7 +119,20 @@ This script:
 - Sets up the proper environment variables
 - Clones the QUBIP ETSI-QKD-004 repository if not already done
 
-### Building and Launching Containers
+### Dockerized Environment
+
+#### Configuration Options
+
+| Variable | Description | Default | Example Values |
+|----------|-------------|---------|---------------|
+| `STRONGSWAN_VERSION` | StrongSwan version | `6.0.0beta6` | `6.0.1`, `master` |
+| `QKD_BACKEND` | QKD backend service | `simulated` | `qukaydee`, `cerberis-xgr`, `python_client` |
+| `ACCOUNT_ID` | QuKayDee account ID | (empty) | Your provider account ID |
+| `ETSI_API_VERSION` | ETSI QKD API version | `014` | `004`, `014` |
+| `BUILD_QKD_ETSI` | Build QKD ETSI API | `true` | `true`, `false` |
+| `BUILD_QKD_KEM` | Build QKD-KEM provider | `true` | `true`, `false` |
+
+#### Building and Launching Containers
 
 Build and launch containers (in this example we use QuKayDee cloud-based QKD network simulator):
 
