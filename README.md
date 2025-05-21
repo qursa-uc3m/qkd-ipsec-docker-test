@@ -183,11 +183,48 @@ If you run Wireshark before initiating the connection and filter for IKEv2 traff
 
 ## Automated Testing
 
-This repository includes an automated performance testing framework to benchmark and compare different cryptographic proposal combinations for StrongSwan's QKD integration. We have implemented the following components:
+This repository includes a Python-based performance testing framework (`benchmark.py`) to benchmark and compare different cryptographic proposal combinations for StrongSwan's QKD integration.
 
-- **Test Scripts**: Python scripts for Alice and Bob that automate multiple handshake iterations
-- **Orchestration**: Shell script to coordinate test execution
-- **Analysis**: Python script to process results and generate visualizations
+The benchmark framework consists of a Python orchestrator that manages all testing aspects, a YAML configuration system for easy parameterization, direct Docker API integration for container management, and automated analysis capabilities for result processing and visualization.
+
+### Configuration Management
+
+The framework uses a YAML configuration file (`config/shared/benchmark_config.yml`) to control the test scenario:
+
+```yaml
+# QKD-IPSec Benchmark Configuration
+docker:
+  build:
+    strongswan_version: "6.0.0beta6"
+    build_qkd_etsi: true
+    build_qkd_kem: true
+    rebuild: true           # Always rebuild containers
+    use_cache: false        # Don't use Docker cache
+
+  qkd:
+    etsi_api_version: "014"  # Options: "004", "014"
+    backend: "qukaydee"      # Options: "simulated", "qukaydee", "cerberis-xgr", "python_client"
+    account_id: "2509"       # Required for QuKayDee only
+
+  compose_file: "docker-compose.yml"
+
+  network:
+    alice_ip: "172.30.0.3"
+    bob_ip: "172.30.0.2"
+
+test:
+  network:
+    apply: true
+    latency: 100            # Milliseconds
+    jitter: 0               # Milliseconds
+    packet_loss: 5          # Percentage
+    duration: "15m"         # Duration string
+
+  iterations: 2
+  
+  analyze_results: true
+  log_scale: true           # Use logarithmic scale for charts
+```
 
 ### Network Condition Simulation
 
@@ -208,43 +245,26 @@ These conditions can be adjusted using command-line parameters when running the 
 | `--packet-loss` | Percentage of dropped packets | 5 | 0, 1, 5, 10 |
 | `--no-network-conditions` | Disable network condition simulation | | |
 
-So, for example, to run the tests with a latency of 200ms, a jitter of 10ms, and a packet loss of 10%, you can use:
-
-```bash
-./run_tests.sh --latency 200 --jitter 10 --packet-loss 10
-```
-
-or to test without any network conditions:
-
-```bash
-./run_tests.sh --no-network-conditions
-```
-
 ### Running the Benchmarks
 
-To execute the complete benchmark test suite (using QuKayDee service as an example):
+To execute the benchmark test suite with default configuration (recommended) just run the `benchmark.py` script:
 
-1. Set required environment variables:
+```bash
+docker system prune -a --volumes
+python benchmark.py
+```
 
-   ```bash
-   # 1. Set required environment variables
-   export ETSI_API_VERSION=014
-   export QKD_BACKEND=qukaydee
-   export ACCOUNT_ID=<your_account_id> # Required by QuKayDee
-   ```
+If you want to run the tests with custom parameters, you can specify them directly in the command line. For example:
 
-2. Build and start containers (if not already running):
+```bash
+python benchmark.py --iterations 20 --latency 100 --packet-loss 5
+```
 
-   ```bash
-   docker-compose -f docker-compose.yml build
-   docker-compose -f docker-compose.yml up -d
-   ```
+Environment variables are handled automatically through the configuration file. To override the QKD backend (Edit `config/shared/benchmark_config.yml` or use command-line options):
 
-3. Run the performance tests
-
-   ```bash
-   ./run_tests.sh --iterations 20 --latency 100 --packet-loss 5
-   ```
+```bash
+python benchmark.py --config custom_config.yml
+```
 
 ### What Gets Measured
 
@@ -335,3 +355,5 @@ To test different cryptographic proposals:
 - Testing outputs are written to the `results/` directory by Docker processes running as root
 - Analysis outputs should be written to `analysis/` at the project root to avoid permission issues
 - After tests complete, do not modify files in the `results/` directory from the host
+- The benchmark script will ask if you want to stop containers when finished
+- For reproducible tests, the framework can be configured to always rebuild containers from scratch

@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host # this seems required for this to work on my Ubuntu 24.04 but not on my Ubuntu 22.04
       args:
         BUILD_QKD_ETSI: "true"
         BUILD_QKD_KEM: "true"
@@ -12,10 +13,12 @@ services:
         STRONGSWAN_VERSION: ${STRONGSWAN_VERSION:-6.0.0beta6}
     image: strongswan-base:latest
     container_name: strongswan-base
+    pull_policy: never
     
   bob:
     image: strongswan-base:latest
     container_name: bob
+    pull_policy: never
     depends_on:
       - strongswan-base
     cap_add:
@@ -41,6 +44,7 @@ services:
   alice:
     image: strongswan-base:latest
     container_name: alice
+    pull_policy: never
     depends_on:
       - strongswan-base
     cap_add:

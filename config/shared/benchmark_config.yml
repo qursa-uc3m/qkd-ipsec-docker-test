@@ -1,0 +1,45 @@
+# QKD-IPSec Benchmark Configuration
+
+# Docker environment configuration
+docker:
+  build:
+    strongswan_version: "6.0.0beta6"
+    build_qkd_etsi: true
+    build_qkd_kem: true
+    rebuild: true
+    use_cache: false
+
+  # QKD backend configuration
+  qkd:
+    etsi_api_version: "014"  # Options: "004", "014"
+    backend: "qukaydee"  # Options: "simulated", "qukaydee", "cerberis-xgr", "python_client"
+    account_id: "2509"           # Required for QuKayDee only
+
+  # Docker Compose file to use
+  compose_file: "docker-compose.yml"  # For ETSI 004, use: "docker-compose.004.yml"
+
+  network:
+    alice_ip: "172.30.0.3"
+    bob_ip: "172.30.0.2"
+
+# Test parameters
+test:
+  # Default network conditions
+  network:
+    apply: true
+    latency: 100             # Milliseconds
+    jitter: 0                # Milliseconds
+    packet_loss: 5           # Percentage
+    duration: "15m"          # Duration string
+
+  # Test iterations
+  iterations: 2
+  
+  # Analysis options
+  analyze_results: true
+  log_scale: true            # Use logarithmic scale for charts
+
+# Proposal configuration (This will be loaded from proposals_config.yml)
+# This section is just for documentation, actual proposals are loaded separately
+proposals:
+  file: "config/shared/proposals_config.yml"

@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
       args:
         BUILD_QKD_ETSI: "true"
         BUILD_QKD_KEM: "true"
@@ -12,10 +13,12 @@ services:
         ETSI_API_VERSION: ${ETSI_API_VERSION:-014}
     image: strongswan-base:latest
     container_name: strongswan-base
-    
+    pull_policy: never
+      
   bob:
     image: strongswan-base:latest
     container_name: bob
+    pull_policy: never
     depends_on:
       - strongswan-base
     cap_add:
@@ -41,6 +44,7 @@ services:
   alice:
     image: strongswan-base:latest
     container_name: alice
+    pull_policy: never
     depends_on:
       - strongswan-base
     cap_add:
@@ -66,6 +70,7 @@ services:
     build:
       context: ./etsi-qkd-004/server
     container_name: qkd_server_alice
+    pull_policy: never
     environment:
       - SERVER_CERT_PEM=/certs/server_cert_qkd_server_alice.pem
       - SERVER_CERT_KEY=/certs/server_key_qkd_server_alice.pem
@@ -94,6 +99,7 @@ services:
     build:
       context: ./etsi-qkd-004/server
     container_name: qkd_server_bob
+    pull_policy: never
     environment:
       - SERVER_CERT_PEM=/certs/server_cert_qkd_server_bob.pem
       - SERVER_CERT_KEY=/certs/server_key_qkd_server_bob.pem
@@ -122,6 +128,7 @@ services:
     build:
       context: ./etsi-qkd-004/keys
     container_name: generate_key_alice
+    pull_policy: never
     environment:
       - BUFFER_SIZE=1000000
       - BUFFER_PATH=/dev/shm/qkd_buffer
@@ -139,6 +146,7 @@ services:
     build:
       context: ./etsi-qkd-004/keys
     container_name: generate_key_bob
+    pull_policy: never
     environment:
       - BUFFER_SIZE=1000000
       - BUFFER_PATH=/dev/shm/qkd_buffer
