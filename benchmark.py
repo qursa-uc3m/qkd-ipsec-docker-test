@@ -858,7 +858,7 @@ class QKDTestOrchestrator:
         analysis_cmd = [
             "python3",
             "analyze_results.py",
-            f"{self.dirs['output_dir']}/plugin_timing_summary.csv",
+            f"{self.dirs['output_dir']}/plugin_timing_raw.csv",
             self.dirs["analysis_dir"],
         ]
 

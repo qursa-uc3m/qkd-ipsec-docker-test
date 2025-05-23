@@ -166,7 +166,7 @@ if [ "$ANALYZE_RESULTS" = true ]; then
   ANALYSIS_DIR="./analysis/${RELATIVE_DIR}"
   mkdir -p "${ANALYSIS_DIR}"
   
-  python3 analyze_results.py "${OUTPUT_DIR}/plugin_timing_summary.csv" "${ANALYSIS_DIR}" --log-scale
+  python3 analyze_results.py "${OUTPUT_DIR}/plugin_timing_raw.csv" "${ANALYSIS_DIR}" --log-scale
   echo "Analysis completed! Results available in ${ANALYSIS_DIR}"
 fi
 

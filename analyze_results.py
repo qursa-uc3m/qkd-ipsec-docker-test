@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,28 +9,25 @@ from matplotlib import rcParams
 import matplotlib.colors as mcolors
 
 
-# Configure matplotlib styling
+# Configure matplotlib styling - matching your reference style
 def setup_matplotlib_styling():
     """Configure matplotlib with consistent styling for all visualization types"""
 
-    rcParams["text.usetex"] = False
-    rcParams["font.family"] = "sans-serif"
-    rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
-    rcParams["font.size"] = 14
+    # Match the font settings from your reference
+    rcParams["font.family"] = "Ubuntu"  # Or use 'Liberation Sans' as alternative
+    rcParams["font.size"] = 11
     rcParams["axes.titlesize"] = 16
-    rcParams["axes.labelsize"] = 14
+    rcParams["axes.labelsize"] = 12
     rcParams["axes.titleweight"] = "bold"
     rcParams["axes.labelweight"] = "bold"
-    rcParams["xtick.labelsize"] = 12
-    rcParams["ytick.labelsize"] = 12
-    rcParams["legend.fontsize"] = 12
-    rcParams["figure.titlesize"] = 18
-    rcParams["figure.figsize"] = (12, 7)
+    rcParams["xtick.labelsize"] = 11
+    rcParams["ytick.labelsize"] = 11
+    rcParams["legend.fontsize"] = 11
+    rcParams["figure.titlesize"] = 16
+    rcParams["figure.figsize"] = (11, 6)
     rcParams["savefig.dpi"] = 300
     rcParams["savefig.bbox"] = "tight"
     rcParams["savefig.format"] = "pdf"
-
-    plt.style.use("seaborn-v0_8-whitegrid")
 
     # Custom color palette
     color_palette = list(
@@ -41,16 +39,15 @@ def setup_matplotlib_styling():
     return color_palette
 
 
-def load_and_validate_data(csv_file, required_columns):
+def load_raw_timing_data(csv_file):
     """
-    Load data from CSV and validate required columns
+    Load raw timing data from CSV file
 
     Args:
-        csv_file: Path to the CSV file
-        required_columns: List of required column names
+        csv_file: Path to the CSV file with raw timing data
 
     Returns:
-        DataFrame or None if validation fails
+        DataFrame with timing data
     """
     if not os.path.exists(csv_file):
         print(f"Error: Results file {csv_file} not found")
@@ -59,397 +56,769 @@ def load_and_validate_data(csv_file, required_columns):
     try:
         df = pd.read_csv(csv_file)
         print(f"Loaded data with columns: {df.columns.tolist()}")
+
+        # Clean column names (remove leading/trailing spaces)
+        df.columns = df.columns.str.strip()
+
+        # Convert timestamps to total microseconds
+        df["create_total_us"] = (
+            df["create_timestamp"] * 1_000_000 + df["create_microseconds"]
+        )
+        df["destroy_total_us"] = (
+            df["destroy_timestamp"] * 1_000_000 + df["destroy_microseconds"]
+        )
+
+        return df
     except Exception as e:
         print(f"Error loading CSV: {e}")
         return None
 
-    # Validate required columns
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        print(f"Error: Required columns not found in {csv_file}: {missing_columns}")
-        print(f"Available columns: {df.columns.tolist()}")
-        return None
 
-    # Set proposal as index for plotting
-    df.set_index("proposal", inplace=True)
-    return df
-
-
-def create_bar_chart(
-    df,
-    y_column,
-    title,
-    ylabel,
-    output_path,
-    yerr_column=None,
-    log_scale=False,
-    annotations=True,
-    color_palette=None,
-):
+def calculate_timing_metrics(df):
     """
-    Create a bar chart from DataFrame
+    Calculate total plugin time and in-plugin time for each proposal/iteration
 
-    Args:
-        df: DataFrame with data
-        y_column: Column name for y-axis values
-        title: Chart title
-        ylabel: Y-axis label
-        output_path: Path to save the chart
-        yerr_column: Column name for error bars (optional)
-        log_scale: Whether to use logarithmic scale for y-axis
-        annotations: Whether to add value annotations to bars
+    Returns:
+        DataFrame with timing metrics per proposal
     """
-    if color_palette is None:
-        color_palette = setup_matplotlib_styling()
+    results = []
 
-    plt.figure(figsize=(12, 7))
-    ax = df[y_column].plot(
-        kind="bar",
-        color=color_palette[-1],
-        yerr=df[yerr_column] if yerr_column else None,
-        capsize=5,
-        edgecolor="black",
-        linewidth=1,
+    # Group by proposal and iteration
+    for (proposal, iteration), group in df.groupby(["proposal", "iteration"]):
+        # Sort by operation_sequence to ensure correct order
+        group = group.sort_values("operation_sequence")
+
+        # Total plugin time: last destroy - first create
+        total_plugin_time_us = (
+            group["destroy_total_us"].iloc[-1] - group["create_total_us"].iloc[0]
+        )
+        total_plugin_time_ms = total_plugin_time_us / 1000.0
+
+        # In-plugin time: sum of (destroy - create) for each operation
+        in_plugin_times = group["destroy_total_us"] - group["create_total_us"]
+        total_in_plugin_time_us = in_plugin_times.sum()
+        total_in_plugin_time_ms = total_in_plugin_time_us / 1000.0
+
+        results.append(
+            {
+                "proposal": proposal,
+                "iteration": iteration,
+                "total_plugin_time_ms": total_plugin_time_ms,
+                "total_in_plugin_time_ms": total_in_plugin_time_ms,
+                "num_operations": len(group),
+            }
+        )
+
+    return pd.DataFrame(results)
+
+
+def aggregate_timing_statistics(timing_df):
+    """
+    Calculate average and standard deviation for each proposal
+
+    Returns:
+        DataFrame with statistics per proposal
+    """
+    stats = (
+        timing_df.groupby("proposal")
+        .agg(
+            {
+                "total_plugin_time_ms": ["mean", "std", "count"],
+                "total_in_plugin_time_ms": ["mean", "std"],
+                "num_operations": "mean",
+            }
+        )
+        .round(3)
     )
 
-    plt.title(title)
-    plt.ylabel(ylabel)
-    plt.xlabel("Proposal")
-    plt.xticks(rotation=45, ha="right")
+    # Flatten column names
+    stats.columns = ["_".join(col).strip() for col in stats.columns.values]
+    stats.columns = [
+        "avg_total_plugin_time_ms",
+        "std_total_plugin_time_ms",
+        "num_iterations",
+        "avg_total_in_plugin_time_ms",
+        "std_total_in_plugin_time_ms",
+        "avg_num_operations",
+    ]
 
-    if log_scale:
-        ax.set_yscale("log")
+    # Reset index to make proposal a column
+    stats = stats.reset_index()
 
-    plt.tight_layout()
-
-    # Add value annotations if requested
-    if annotations:
-        for i, v in enumerate(df[y_column]):
-            # Format text with value and uncertainty on same line
-            if yerr_column:
-                text = f"{v:.2f} ± {df[yerr_column].iloc[i]:.2f}"
-            else:
-                text = f"{v:.2f}"
-
-            # Adjust position based on scale type
-            if log_scale:
-                y_pos = v * 1.3  # Multiplicative position for log scale
-            else:
-                y_pos = v + (
-                    max(df[y_column]) * 0.05
-                )  # Additive position for linear scale
-
-            ax.text(
-                i,
-                y_pos,
-                text,
-                horizontalalignment="center",
-                fontsize=11,
-                fontweight="bold",
-            )
-
-    plt.savefig(output_path)
-    plt.close()
-
-
-def create_grouped_bar_chart(
-    df,
-    y1_column,
-    y2_column,
-    y1_label,
-    y2_label,
-    title,
-    ylabel,
-    output_path,
-    yerr1_column=None,
-    yerr2_column=None,
-    log_scale=False,
-    color_palette=None,
-):
-    """Create a grouped bar chart comparing two metrics"""
-    x = np.arange(len(df.index))
-    width = 0.35
-
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    if color_palette is None:
-        color_palette = setup_matplotlib_styling()
-
-    # Plot first set of bars
-    rects1 = ax.bar(
-        x - width / 2,
-        df[y1_column],
-        width,
-        label=y1_label,
-        color=color_palette[0],
-        edgecolor="black",
-        yerr=df[yerr1_column] if yerr1_column else None,
-    )
-
-    # Plot second set of bars
-    rects2 = ax.bar(
-        x + width / 2,
-        df[y2_column],
-        width,
-        label=y2_label,
-        color=color_palette[-1],
-        edgecolor="black",
-        yerr=df[yerr2_column] if yerr2_column else None,
-    )
-
-    if log_scale:
-        ax.set_yscale("log")
-
-    # Add labels, title and legend
-    ax.set_xlabel("Proposal")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.set_xticks(x)
-    ax.set_xticklabels(df.index, rotation=45, ha="right")
-    ax.legend()
-
-    # Add value annotations
-    def autolabel(rects, stddevs=None):
-        for i, rect in enumerate(rects):
-            height = rect.get_height()
-            text = f"{height:.2f}"
-            if stddevs is not None:
-                text += f"\n±{stddevs.iloc[i]:.2f}"
-
-            if log_scale:
-                y_pos = height * 1.1
-            else:
-                y_pos = height + (ax.get_ylim()[1] * 0.01)
-
-            ax.annotate(
-                text,
-                xy=(rect.get_x() + rect.get_width() / 2, height),
-                xytext=(0, 3),  # vertical offset
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=8,
-            )
-
-    autolabel(rects1, df[yerr1_column] if yerr1_column else None)
-    autolabel(rects2, df[yerr2_column] if yerr2_column else None)
-
-    fig.tight_layout()
-    plt.savefig(output_path)
-    plt.close()
-
-
-def create_statistics_table(df, output_path):
-    """Create a table visualization of key statistics"""
-    # Extract key metrics for table
-    table_data = pd.DataFrame(
-        {
-            "Avg Time (ms)": df["avg_time_in_plugin_per_iter_ms"],
-            "Std Dev (ms)": df["stddev_time_ms"],
-            "CoV (%)": (
-                df["stddev_time_ms"] / df["avg_time_in_plugin_per_iter_ms"] * 100
-            ),
-        }
-    )
-
-    # Round values for display
-    table_data = table_data.round(2)
-
-    # Create table plot
-    fig, ax = plt.subplots(figsize=(10, len(df) * 0.8 + 1))
-    ax.axis("off")
-    ax.axis("tight")
-
-    table = ax.table(
-        cellText=table_data.values,
-        rowLabels=table_data.index,
-        colLabels=table_data.columns,
-        cellLoc="center",
-        loc="center",
-    )
-
-    table.auto_set_font_size(False)
-    table.set_fontsize(12)
-    table.scale(1.2, 1.5)
-
-    plt.title("Statistical Summary of Plugin Timing Measurements")
-    plt.tight_layout()
-    plt.savefig(output_path)
-    plt.close()
-
-
-def generate_statistics(df):
-    """Generate statistical summary from DataFrame"""
-    stats = pd.DataFrame()
-    for column in df.columns:
-        if column != "proposal":  # Skip the proposal column
-            stats[column] = [
-                df[column].mean(),
-                df[column].std(),
-                df[column].min(),
-                df[column].max(),
-            ]
-
-    stats.index = ["Mean", "Std Dev", "Min", "Max"]
     return stats
 
 
-def generate_report(df, stats, output_path, log_scale=False, has_stddev=False):
-    """Generate a text report of the analysis results"""
+def plot_boxplot_with_scatter(
+    timing_df, stats_df, title, ylabel, output_path, color_palette=None
+):
+    """
+    Create a boxplot with scatter points overlay, matching the reference style
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Prepare data for boxplot
+    proposals = timing_df["proposal"].unique()
+    # Sort proposals to match the order in stats_df
+    proposals = stats_df["proposal"].values
+
+    # Create list of arrays for boxplot
+    data_arrays = []
+    positions = []
+
+    for i, proposal in enumerate(proposals):
+        data = timing_df[timing_df["proposal"] == proposal][
+            "total_plugin_time_ms"
+        ].values
+        data_arrays.append(data)
+        positions.append(i)
+
+    # Create boxplot
+    bp = ax.boxplot(
+        data_arrays,
+        positions=positions,
+        widths=0.6,
+        patch_artist=True,
+        showfliers=False,
+        # MODIFIED LINE: Change facecolor to white and adjust alpha for transparency
+        boxprops=dict(facecolor="white", alpha=0.3, linewidth=1.2),
+        whiskerprops=dict(linewidth=1.2),
+        capprops=dict(linewidth=1.2),
+        medianprops=dict(linewidth=1.5, color="darkblue"),
+    )
+
+    # Add scatter points on top
+    for i, (proposal, data) in enumerate(zip(proposals, data_arrays)):
+        # Add jitter to x-coordinates for better visibility
+        x = np.random.normal(i, 0.04, size=len(data))
+        # You might want to make scatter points more visible if boxes are transparent
+        # For example, use a color from the palette or a darker color
+        ax.scatter(
+            x,
+            data,
+            alpha=0.7,
+            s=40,
+            color=color_palette[i % len(color_palette)],
+            edgecolor="black",
+            linewidth=0.5,
+        )
+
+    # Customize plot
+    ax.set_xticks(positions)
+    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Set labels and title
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
+    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_network_conditions_comparison(
+    all_data,
+    proposals,
+    network_conditions,
+    title,
+    ylabel,
+    output_path,
+    color_palette=None,
+):
+    """
+    Create a boxplot comparing different network conditions for each proposal
+    with transparent boxes and colored scatter points
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Setup positions
+    n_conditions = len(network_conditions)
+    n_proposals = len(proposals)
+    width = 0.8 / n_conditions  # Width of each box
+    group_width = 0.9  # Total width for each proposal group
+
+    # Colors for different network conditions
+    colors = [
+        color_palette[i]
+        for i in np.linspace(0, len(color_palette) - 1, n_conditions, dtype=int)
+    ]
+
+    all_positions = []
+    all_labels = []
+
+    for i, proposal in enumerate(proposals):
+        base_pos = i * 1.0  # Base position for this proposal
+
+        for j, condition in enumerate(network_conditions):
+            # Position for this condition within the proposal group
+            pos = base_pos + (j - n_conditions / 2 + 0.5) * width
+
+            # Get data for this proposal and condition
+            data_key = (
+                f"{proposal}||{condition}"  # Use || as separator to avoid conflicts
+            )
+            if data_key in all_data:
+                data = all_data[data_key]
+
+                # Create transparent boxplot
+                bp = ax.boxplot(
+                    [data],
+                    positions=[pos],
+                    widths=width * 0.8,
+                    patch_artist=True,
+                    showfliers=False,
+                    boxprops=dict(facecolor="white", alpha=0.3, linewidth=1.2),
+                    whiskerprops=dict(linewidth=1.2),
+                    capprops=dict(linewidth=1.2),
+                    medianprops=dict(linewidth=1.5, color="darkblue"),
+                )
+
+                # Add colored scatter points with jitter
+                x_scatter = np.random.normal(pos, width * 0.15, size=len(data))
+                ax.scatter(
+                    x_scatter,
+                    data,
+                    alpha=0.7,
+                    s=40,
+                    color=colors[j],
+                    edgecolor="black",
+                    linewidth=0.5,
+                    label=condition if i == 0 else "",
+                )
+
+    # Set x-axis
+    ax.set_xticks([i * 1.0 for i in range(n_proposals)])
+    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Set labels and title
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
+    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
+
+    # Add legend
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(
+        by_label.values(),
+        by_label.keys(),
+        loc="upper right",
+        fontsize=10,
+        framealpha=0.9,
+    )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def create_timing_bar_chart(
+    stats_df, metric_column, std_column, title, ylabel, output_path, color_palette=None
+):
+    """
+    Create a bar chart with error bars for timing metrics
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Create bar positions
+    x = np.arange(len(stats_df))
+
+    # Create bars with error bars
+    bars = ax.bar(
+        x,
+        stats_df[metric_column],
+        yerr=stats_df[std_column],
+        capsize=5,
+        color=color_palette[-1],
+        edgecolor="black",
+        linewidth=1.2,
+    )
+
+    # Customize plot
+    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
+    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Add value annotations on bars
+    for i, (bar, mean, std) in enumerate(
+        zip(bars, stats_df[metric_column], stats_df[std_column])
+    ):
+        height = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + std + max(stats_df[metric_column]) * 0.01,
+            f"{mean:.2f}±{std:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def create_comparison_chart(stats_df, output_path, color_palette=None):
+    """
+    Create a bar chart showing the difference between total plugin time and in-plugin time
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    # Calculate the difference (overhead)
+    stats_df["overhead_ms"] = (
+        stats_df["avg_total_plugin_time_ms"] - stats_df["avg_total_in_plugin_time_ms"]
+    )
+    stats_df["overhead_percent"] = (
+        stats_df["overhead_ms"] / stats_df["avg_total_in_plugin_time_ms"]
+    ) * 100
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Create bar positions
+    x = np.arange(len(stats_df))
+
+    # Create bars
+    bars = ax.bar(
+        x,
+        stats_df["overhead_ms"],
+        color=color_palette[4],  # Use a middle color from palette
+        edgecolor="black",
+        linewidth=1.2,
+    )
+
+    # Customize plot
+    ax.set_title(
+        "Plugin Overhead: Difference Between Total Time and Active Plugin Time",
+        fontweight="bold",
+        fontsize=16,
+        pad=20,
+    )
+    ax.set_ylabel(
+        "Overhead (milliseconds)", fontweight="bold", fontsize=12, labelpad=20
+    )
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Add value annotations on bars with percentage
+    for i, (bar, overhead_ms, overhead_pct) in enumerate(
+        zip(bars, stats_df["overhead_ms"], stats_df["overhead_percent"])
+    ):
+        height = bar.get_height()
+        # Position text above or below bar depending on sign
+        va = "bottom" if height >= 0 else "top"
+        y_offset = (
+            0.01 * max(abs(stats_df["overhead_ms"]))
+            if height >= 0
+            else -0.01 * max(abs(stats_df["overhead_ms"]))
+        )
+
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + y_offset,
+            f"{overhead_ms:.2f} ms\n({overhead_pct:.1f}%)",
+            ha="center",
+            va=va,
+            fontsize=10,
+            fontweight="bold",
+        )
+
+    # Add horizontal line at y=0
+    ax.axhline(y=0, color="black", linestyle="-", linewidth=0.5)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def generate_detailed_report(stats_df, timing_df, output_path):
+    """Generate a detailed text report of the analysis"""
     with open(output_path, "w") as f:
-        f.write("StrongSwan QKD Plugin Timing Analysis\n")
-        f.write("====================================\n\n")
+        f.write("StrongSwan QKD Plugin Timing Analysis Report\n")
+        f.write("=" * 50 + "\n\n")
 
-        f.write("Statistical Summary:\n")
-        f.write("-------------------\n")
-        f.write(stats.to_string())
-        f.write("\n\n")
+        f.write("Analysis Summary\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Total proposals analyzed: {len(stats_df)}\n")
+        f.write(f"Total measurements: {len(timing_df)}\n\n")
 
-        # Compare proposals for average time per iteration
-        best_proposal = df["avg_time_in_plugin_per_iter_ms"].idxmin()
-        worst_proposal = df["avg_time_in_plugin_per_iter_ms"].idxmax()
+        # Best/worst performers for total plugin time
+        f.write("Total Plugin Time Analysis (First Create to Last Destroy)\n")
+        f.write("-" * 50 + "\n")
+        best_idx = stats_df["avg_total_plugin_time_ms"].idxmin()
+        worst_idx = stats_df["avg_total_plugin_time_ms"].idxmax()
 
-        f.write(f"Fastest proposal (lowest avg time): {best_proposal}\n")
+        f.write(f"Fastest: {stats_df.loc[best_idx, 'proposal']}\n")
         f.write(
-            f"Average time per iteration: {df.loc[best_proposal, 'avg_time_in_plugin_per_iter_ms']:.3f} ms\n"
+            f"  Average: {stats_df.loc[best_idx, 'avg_total_plugin_time_ms']:.3f} ms\n"
         )
-        if has_stddev:
-            f.write(
-                f"Standard deviation: {df.loc[best_proposal, 'stddev_time_ms']:.3f} ms\n"
-            )
-            f.write(
-                f"Coefficient of variation: {(df.loc[best_proposal, 'stddev_time_ms'] / df.loc[best_proposal, 'avg_time_in_plugin_per_iter_ms'] * 100):.2f}%\n"
-            )
-        f.write("\n")
-
-        f.write(f"Slowest proposal (highest avg time): {worst_proposal}\n")
         f.write(
-            f"Average time per iteration: {df.loc[worst_proposal, 'avg_time_in_plugin_per_iter_ms']:.3f} ms\n"
+            f"  Std Dev: {stats_df.loc[best_idx, 'std_total_plugin_time_ms']:.3f} ms\n\n"
         )
-        if has_stddev:
+
+        f.write(f"Slowest: {stats_df.loc[worst_idx, 'proposal']}\n")
+        f.write(
+            f"  Average: {stats_df.loc[worst_idx, 'avg_total_plugin_time_ms']:.3f} ms\n"
+        )
+        f.write(
+            f"  Std Dev: {stats_df.loc[worst_idx, 'std_total_plugin_time_ms']:.3f} ms\n\n"
+        )
+
+        # Performance ratios
+        f.write("Performance Comparisons\n")
+        f.write("-" * 30 + "\n")
+        for _, row in stats_df.iterrows():
+            overhead = (
+                (row["avg_total_plugin_time_ms"] - row["avg_total_in_plugin_time_ms"])
+                / row["avg_total_in_plugin_time_ms"]
+                * 100
+            )
+            f.write(f"{row['proposal']}:\n")
+            f.write(f"  Plugin overhead: {overhead:.1f}%\n")
             f.write(
-                f"Standard deviation: {df.loc[worst_proposal, 'stddev_time_ms']:.3f} ms\n"
+                f"  Average operations per iteration: {row['avg_num_operations']:.1f}\n\n"
             )
-            f.write(
-                f"Coefficient of variation: {(df.loc[worst_proposal, 'stddev_time_ms'] / df.loc[worst_proposal, 'avg_time_in_plugin_per_iter_ms'] * 100):.2f}%\n"
-            )
-        f.write("\n")
-
-        # Performance comparison
-        if worst_proposal != best_proposal:
-            perf_ratio = (
-                df.loc[worst_proposal, "avg_time_in_plugin_per_iter_ms"]
-                / df.loc[best_proposal, "avg_time_in_plugin_per_iter_ms"]
-            )
-            f.write(f"Performance ratio (slowest/fastest): {perf_ratio:.2f}x\n\n")
-
-        f.write("Generated visualizations:\n")
-        # List of visualizations will be added by the main function
 
 
-def analyze_results(csv_file, output_dir="analysis", log_scale=False):
-    """Main analysis function"""
+def load_network_condition_data(result_dirs):
+    """
+    Load timing data from multiple network condition directories
+
+    Args:
+        result_dirs: List of directory paths containing test results
+
+    Returns:
+        Dictionary with combined data and network condition labels
+    """
+    all_data = {}
+    network_conditions = []
+
+    for result_dir in result_dirs:
+        # Extract network condition from directory name
+        dir_name = os.path.basename(result_dir)
+
+        # Parse network condition from directory name
+        if dir_name.startswith("no_network_conditions"):
+            condition_label = "No Network Conditions"
+        else:
+            # Extract lat, jit, loss values from directory name
+            parts = dir_name.split("_")
+            lat = jit = loss = "0"
+
+            for part in parts:
+                if part.startswith("lat"):
+                    lat = part[3:]
+                elif part.startswith("jit"):
+                    jit = part[3:]
+                elif part.startswith("loss"):
+                    loss = part[4:]
+
+            condition_label = f"Lat:{lat}ms Jit:{jit}ms Loss:{loss}%"
+
+        network_conditions.append(condition_label)
+
+        # Look for plugin_timing_raw.csv in the directory
+        raw_csv_path = os.path.join(result_dir, "plugin_timing_raw.csv")
+        if os.path.exists(raw_csv_path):
+            print(f"Loading data from {raw_csv_path}")
+            df = load_raw_timing_data(raw_csv_path)
+            if df is not None:
+                timing_df = calculate_timing_metrics(df)
+
+                # Store data for each proposal under this condition
+                for proposal in timing_df["proposal"].unique():
+                    data_key = f"{proposal}||{condition_label}"  # Use || as separator
+                    proposal_data = timing_df[timing_df["proposal"] == proposal][
+                        "total_plugin_time_ms"
+                    ].values
+                    all_data[data_key] = proposal_data
+        else:
+            print(f"Warning: No plugin_timing_raw.csv found in {result_dir}")
+            print(f"  Looking for alternative files...")
+
+            # Try to find the timing data in subdirectories or with different names
+            found = False
+            for root, dirs, files in os.walk(result_dir):
+                if "plugin_timing_raw.csv" in files:
+                    alt_path = os.path.join(root, "plugin_timing_raw.csv")
+                    print(f"  Found at: {alt_path}")
+                    df = load_raw_timing_data(alt_path)
+                    if df is not None:
+                        timing_df = calculate_timing_metrics(df)
+                        for proposal in timing_df["proposal"].unique():
+                            data_key = f"{proposal}||{condition_label}"
+                            proposal_data = timing_df[
+                                timing_df["proposal"] == proposal
+                            ]["total_plugin_time_ms"].values
+                            all_data[data_key] = proposal_data
+                        found = True
+                        break
+
+            if not found:
+                print(
+                    f"  Could not find plugin_timing_raw.csv in {result_dir} or subdirectories"
+                )
+
+    return all_data, network_conditions
+
+
+def analyze_network_conditions(result_dirs, output_dir="analysis_network_comparison"):
+    """
+    Analyze and compare plugin timing across different network conditions
+
+    Args:
+        result_dirs: List of directories containing test results for different network conditions
+        output_dir: Output directory for analysis results
+    """
     # Set up matplotlib styling
     color_palette = setup_matplotlib_styling()
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define required columns
-    required_columns = ["proposal", "avg_time_in_plugin_per_iter_ms"]
+    # Load data from all directories
+    print("Loading data from multiple network conditions...")
+    all_data, network_conditions = load_network_condition_data(result_dirs)
 
-    # Load and validate data
-    df = load_and_validate_data(csv_file, required_columns)
+    if not all_data:
+        print("Error: No data loaded from any directory")
+        return False
+
+    # Extract unique proposals - use || separator
+    proposals = list(set([key.split("||")[0] for key in all_data.keys()]))
+    proposals.sort()  # Ensure consistent ordering
+
+    print(f"Found proposals: {proposals}")
+    print(f"Found network conditions: {network_conditions}")
+
+    # Create comparison plot
+    print("Creating network conditions comparison plot...")
+    comparison_plot_path = f"{output_dir}/network_conditions_comparison.pdf"
+    plot_network_conditions_comparison(
+        all_data,
+        proposals,
+        network_conditions,
+        f"Plugin Timing Comparison Across Network Conditions",
+        "Time (milliseconds)",
+        comparison_plot_path,
+        color_palette,
+    )
+    print(f"Created comparison plot: {comparison_plot_path}")
+
+    # Generate summary statistics
+    stats_data = []
+    for condition in network_conditions:
+        for proposal in proposals:
+            data_key = f"{proposal}||{condition}"
+            if data_key in all_data:
+                data = all_data[data_key]
+                stats_data.append(
+                    {
+                        "network_condition": condition,
+                        "proposal": proposal,
+                        "mean_ms": np.mean(data),
+                        "std_ms": np.std(data),
+                        "min_ms": np.min(data),
+                        "max_ms": np.max(data),
+                        "count": len(data),
+                    }
+                )
+
+    # Save statistics to CSV
+    stats_df = pd.DataFrame(stats_data)
+    stats_csv_path = f"{output_dir}/network_comparison_statistics.csv"
+    stats_df.to_csv(stats_csv_path, index=False)
+    print(f"Saved statistics to {stats_csv_path}")
+
+    # Generate report
+    report_path = f"{output_dir}/network_comparison_report.txt"
+    with open(report_path, "w") as f:
+        f.write("Network Conditions Comparison Report\n")
+        f.write("=" * 50 + "\n\n")
+        f.write(f"Analyzed {len(network_conditions)} network conditions\n")
+        f.write(f"Proposals: {', '.join(proposals)}\n\n")
+
+        for condition in network_conditions:
+            f.write(f"\n{condition}:\n")
+            f.write("-" * 30 + "\n")
+            for proposal in proposals:
+                data_key = f"{proposal}||{condition}"
+                if data_key in all_data:
+                    data = all_data[data_key]
+                    f.write(
+                        f"  {proposal}: {np.mean(data):.2f} ± {np.std(data):.2f} ms (n={len(data)})\n"
+                    )
+
+    print(f"Generated report: {report_path}")
+    print(f"\nAnalysis completed! Results saved to {output_dir}/")
+
+    return True
+
+
+def analyze_plugin_timing(raw_csv_file, output_dir="analysis"):
+    """Main analysis function for plugin timing data"""
+
+    # Set up matplotlib styling
+    color_palette = setup_matplotlib_styling()
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load raw timing data
+    print("Loading raw timing data...")
+    df = load_raw_timing_data(raw_csv_file)
     if df is None:
         return False
 
-    # Check for standard deviation columns
-    stddev_columns = ["stddev_time_ms", "stddev_plugin_ms"]
-    has_stddev = all(col in df.columns for col in stddev_columns)
+    # Calculate timing metrics
+    print("Calculating timing metrics...")
+    timing_df = calculate_timing_metrics(df)
 
-    # Generate statistics
-    stats = generate_statistics(df)
-    stats.to_csv(f"{output_dir}/timing_statistics.csv")
+    # Aggregate statistics by proposal
+    print("Aggregating statistics...")
+    stats_df = aggregate_timing_statistics(timing_df)
 
-    # Track generated visualizations for report
-    visualizations = []
+    # Save detailed timing data
+    timing_csv_path = f"{output_dir}/detailed_timing_metrics.csv"
+    timing_df.to_csv(timing_csv_path, index=False)
+    print(f"Saved detailed timing metrics to {timing_csv_path}")
 
-    # 1. Create average time per iteration bar chart
-    avg_time_chart_path = f"{output_dir}/avg_time_per_iter.pdf"
-    create_bar_chart(
-        df,
-        "avg_elapsed_time_per_iter_ms",
-        "Average Time per Iteration by Proposal",
+    # Save aggregated statistics
+    stats_csv_path = f"{output_dir}/plugin_timing_statistics.csv"
+    stats_df.to_csv(stats_csv_path, index=False)
+    print(f"Saved aggregated statistics to {stats_csv_path}")
+
+    # Create visualizations
+    print("Creating visualizations...")
+
+    # 1. Total plugin time boxplot with scatter
+    total_plugin_boxplot = f"{output_dir}/total_plugin_time_boxplot.pdf"
+    plot_boxplot_with_scatter(
+        timing_df,
+        stats_df,
+        f'Total Plugin Time by Proposal (N={int(stats_df["num_iterations"].iloc[0])})',
         "Time (milliseconds)",
-        avg_time_chart_path,
-        "stddev_time_ms" if has_stddev else None,
-        log_scale=log_scale,
-        color_palette=color_palette,
+        total_plugin_boxplot,
+        color_palette,
     )
-    visualizations.append(
-        f"1. {avg_time_chart_path} - Average time per iteration across proposals"
+    print(f"Created total plugin time boxplot: {total_plugin_boxplot}")
+
+    # 2. Average total plugin time bar chart
+    total_plugin_chart = f"{output_dir}/avg_total_plugin_time.pdf"
+    create_timing_bar_chart(
+        stats_df,
+        "avg_total_plugin_time_ms",
+        "std_total_plugin_time_ms",
+        "Average Total Plugin Time by Proposal\n(First Create to Last Destroy)",
+        "Time (milliseconds)",
+        total_plugin_chart,
+        color_palette,
     )
+    print(f"Created average total plugin time chart: {total_plugin_chart}")
 
-    # 2. Create total timing metrics comparison if available
-    if all(col in df.columns for col in ["total_time_ms", "total_time_plugin_ms"]):
-        total_chart_path = f"{output_dir}/total_timing_metrics.pdf"
-        create_grouped_bar_chart(
-            df,
-            "avg_elapsed_time_per_iter_ms",
-            "avg_time_in_plugin_per_iter_ms",
-            "Average Time (First to Last)",
-            "Average Plugin Time",
-            "Time Metrics by Proposal",
-            "Time (milliseconds)",
-            total_chart_path,
-            None,
-            None,  # No error bars for totals
-            log_scale,
-            color_palette=color_palette,
-        )
-        visualizations.append(f"3. {total_chart_path} - Timing metrics by proposal")
-
-    # 4. Create statistics table if standard deviation available
-    if has_stddev:
-        table_path = f"{output_dir}/timing_statistics_table.pdf"
-        create_statistics_table(df, table_path)
-        visualizations.append(f"4. {table_path} - Statistical summary table")
-
-    # 5. Generate CSV output
-    csv_path = f"{output_dir}/timing_statistics.csv"
-    visualizations.append(f"5. {csv_path} - Detailed timing statistics")
+    # 3. Overhead comparison chart
+    comparison_chart = f"{output_dir}/plugin_overhead_comparison.pdf"
+    create_comparison_chart(stats_df, comparison_chart, color_palette)
+    print(f"Created overhead comparison chart: {comparison_chart}")
 
     # Generate report
-    report_path = f"{output_dir}/timing_analysis_report.txt"
-    generate_report(df, stats, report_path, log_scale, has_stddev)
+    report_path = f"{output_dir}/plugin_timing_report.txt"
+    generate_detailed_report(stats_df, timing_df, report_path)
+    print(f"Generated analysis report: {report_path}")
 
-    # Add visualizations to report
-    with open(report_path, "a") as f:
-        for viz in visualizations:
-            f.write(f"{viz}\n")
+    print(f"\nAnalysis completed successfully! All results saved to {output_dir}/")
 
-        if log_scale:
-            f.write("\nNote: All plots use logarithmic scale for y-axis\n")
+    # Print summary to console
+    print("\nQuick Summary:")
+    print("-" * 50)
+    print("Average Total Plugin Time (ms):")
+    for _, row in stats_df.iterrows():
+        print(
+            f"  {row['proposal']}: {row['avg_total_plugin_time_ms']:.2f} ± {row['std_total_plugin_time_ms']:.2f}"
+        )
 
-    print(f"Analysis completed. Results saved to {output_dir}/")
     return True
 
 
 if __name__ == "__main__":
     # Parse command line arguments
     if len(sys.argv) < 2:
+        print("Usage:")
         print(
-            "Usage: python analyze_results.py <plugin_timing_file> [<output_dir>] [--log-scale]"
+            "  Single file mode: python analyze_plugin_timing.py <raw_timing_csv> [<output_dir>]"
+        )
+        print(
+            "  Network comparison mode: python analyze_plugin_timing.py --network-compare <dir1> <dir2> ... [--output <output_dir>]"
+        )
+        print("\nExamples:")
+        print("  python analyze_plugin_timing.py timing_data.csv analysis_output")
+        print(
+            "  python analyze_plugin_timing.py --network-compare lat0_jit0_loss1_iter30_* lat100_jit0_loss0_iter30_* --output network_analysis"
         )
         sys.exit(1)
 
-    # Extract the log_scale flag from arguments
-    log_scale = "--log-scale" in sys.argv
-    # Remove it from arguments if present
-    if log_scale:
-        sys.argv.remove("--log-scale")
+    if sys.argv[1] == "--network-compare":
+        # Network comparison mode
+        result_dirs = []
+        output_dir = "analysis_network_comparison"
 
-    csv_file = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else "analysis"
+        i = 2
+        while i < len(sys.argv):
+            if sys.argv[i] == "--output":
+                if i + 1 < len(sys.argv):
+                    output_dir = sys.argv[i + 1]
+                    i += 2
+                else:
+                    print("Error: --output requires a directory name")
+                    sys.exit(1)
+            else:
+                result_dirs.append(sys.argv[i])
+                i += 1
 
-    analyze_results(csv_file, output_dir, log_scale)
+        if len(result_dirs) < 2:
+            print("Error: Network comparison mode requires at least 2 directories")
+            sys.exit(1)
+
+        # Run network conditions analysis
+        success = analyze_network_conditions(result_dirs, output_dir)
+    else:
+        # Single file mode
+        csv_file = sys.argv[1]
+        output_dir = sys.argv[2] if len(sys.argv) > 2 else "analysis"
+
+        # Run standard analysis
+        success = analyze_plugin_timing(csv_file, output_dir)
+
+    sys.exit(0 if success else 1)

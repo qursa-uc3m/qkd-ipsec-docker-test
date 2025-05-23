@@ -1,4 +1,4 @@
-# Alice: Testing Script
+# Alice: Testing Script with Raw Plugin Timing Collection
 
 import argparse
 import os
@@ -266,9 +266,79 @@ def reset_timing_log(log_file_path, log_message):
         return False
 
 
+def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_message):
+    """
+    Collect raw plugin timing data from temporary file for each iteration.
+    Preserves all individual creation/destruction events without calculating differences.
+
+    Args:
+        plugin_timing_log: Path to the plugin timing log file
+        prop: The cryptographic proposal being tested
+        iteration: The iteration number
+        log_message: Function for logging messages
+
+    Returns:
+        DataFrame with raw timing data, or empty DataFrame if no data
+    """
+    log_message(f"Collecting raw plugin timing data for proposal: {prop}, iteration: {iteration}")
+
+    # Check if the timing log exists
+    if not os.path.exists(plugin_timing_log):
+        log_message(f"Timing log file {plugin_timing_log} not found")
+        return pd.DataFrame()
+
+    try:
+        # Read the timing log file
+        timing_df = pd.read_csv(plugin_timing_log)
+
+        # If the file is empty or has no data, return empty DataFrame
+        if timing_df.empty:
+            log_message("No plugin timing data found")
+            return pd.DataFrame()
+
+        # Remove any rows with NaN or empty method values
+        timing_df = timing_df.dropna(subset=["method"])
+        
+        if timing_df.empty:
+            log_message("No valid plugin timing data after filtering")
+            return pd.DataFrame()
+
+        # Convert timestamp columns to numeric types for consistency
+        numeric_cols = [
+            "create_timestamp",
+            "create_microseconds", 
+            "destroy_timestamp",
+            "destroy_microseconds",
+        ]
+        for col in numeric_cols:
+            if col in timing_df.columns:
+                timing_df[col] = pd.to_numeric(timing_df[col], errors="coerce")
+
+        # Add metadata columns to identify this specific test run
+        timing_df["proposal"] = prop
+        timing_df["iteration"] = iteration
+        
+        # Add sequence number for operations within this iteration
+        timing_df["operation_sequence"] = range(1, len(timing_df) + 1)
+
+        # Keep all original columns and metadata - no time difference calculations
+        log_message(f"Collected {len(timing_df)} raw timing measurements for {prop} iteration {iteration}")
+        
+        # Log the methods captured for debugging
+        methods_found = timing_df["method"].unique().tolist()
+        log_message(f"Methods captured: {methods_found}")
+        
+        return timing_df
+
+    except Exception as e:
+        log_message(f"Error collecting raw plugin timing data: {e}")
+        return pd.DataFrame()
+
+
 def process_plugin_timing_data(plugin_timing_log, prop, log_message):
     """
     Process plugin timing data from temporary file for each proposal
+    (Kept for backward compatibility with aggregated stats)
 
     Args:
         plugin_timing_log: Path to the plugin timing log file
@@ -295,10 +365,6 @@ def process_plugin_timing_data(plugin_timing_log, prop, log_message):
 
     try:
         # Read the timing log file
-        # Print raw file content for debugging
-        with open(plugin_timing_log, "r") as f:
-            content = f.read()
-            log_message(f"Raw timing log content:\n{content}")
         timing_df = pd.read_csv(plugin_timing_log)
 
         # If the file is empty or has no data, return default values
@@ -629,7 +695,8 @@ def main():
     # Initialize data structures
     df_counters = pd.DataFrame()  # For request/response counts
     df_latencies = pd.DataFrame()  # For latency measurements
-    df_plugin_timing = pd.DataFrame()
+    df_plugin_timing = pd.DataFrame()  # For aggregated plugin timing
+    df_raw_plugin_timing = pd.DataFrame()  # For raw individual plugin timing measurements
 
     # Establish connection with Bob
     conn, server_socket = establish_connection(HOST, PORT, NUM_ITERATIONS, log_message)
@@ -651,7 +718,19 @@ def main():
         for i in range(1, NUM_ITERATIONS + 1):
             reset_timing_log(PLUGIN_TIMING_LOG, log_message)
             run_test_iteration(i, NUM_ITERATIONS, conn, log_message)
-            # Process plugin timing data for this iteration - now separate from run_test_iteration
+            
+            # Collect raw plugin timing data for this iteration
+            raw_timing_data = collect_raw_plugin_timing_data(
+                PLUGIN_TIMING_LOG, prop, i, log_message
+            )
+            
+            # Append to the master raw timing DataFrame
+            if not raw_timing_data.empty:
+                df_raw_plugin_timing = pd.concat(
+                    [df_raw_plugin_timing, raw_timing_data], ignore_index=True
+                )
+
+            # Process plugin timing data for aggregated stats (for backward compatibility)
             iteration_stats = process_plugin_timing_data(
                 PLUGIN_TIMING_LOG, f"iteration_{i}", log_message
             )
@@ -692,14 +771,17 @@ def main():
     counters_file = f"{OUTPUT_DIR}/counters.csv"
     latencies_file = f"{OUTPUT_DIR}/latencies.csv"
     plugin_timing_file = f"{OUTPUT_DIR}/plugin_timing_summary.csv"
+    raw_plugin_timing_file = f"{OUTPUT_DIR}/plugin_timing_raw.csv"
 
     df_counters.to_csv(counters_file, index=False)
     df_latencies.to_csv(latencies_file, index=False)
     df_plugin_timing.to_csv(plugin_timing_file, index=False)
+    df_raw_plugin_timing.to_csv(raw_plugin_timing_file, index=False)
 
     log_message(f"Counter data stored in '{counters_file}'")
     log_message(f"Latency data stored in '{latencies_file}'")
     log_message(f"Plugin timing data stored in '{plugin_timing_file}'")
+    log_message(f"Raw plugin timing data stored in '{raw_plugin_timing_file}'")
 
     # Generate report
     generate_report(
