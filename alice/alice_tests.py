@@ -280,7 +280,9 @@ def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_messa
     Returns:
         DataFrame with raw timing data, or empty DataFrame if no data
     """
-    log_message(f"Collecting raw plugin timing data for proposal: {prop}, iteration: {iteration}")
+    log_message(
+        f"Collecting raw plugin timing data for proposal: {prop}, iteration: {iteration}"
+    )
 
     # Check if the timing log exists
     if not os.path.exists(plugin_timing_log):
@@ -298,7 +300,7 @@ def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_messa
 
         # Remove any rows with NaN or empty method values
         timing_df = timing_df.dropna(subset=["method"])
-        
+
         if timing_df.empty:
             log_message("No valid plugin timing data after filtering")
             return pd.DataFrame()
@@ -306,7 +308,7 @@ def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_messa
         # Convert timestamp columns to numeric types for consistency
         numeric_cols = [
             "create_timestamp",
-            "create_microseconds", 
+            "create_microseconds",
             "destroy_timestamp",
             "destroy_microseconds",
         ]
@@ -317,17 +319,19 @@ def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_messa
         # Add metadata columns to identify this specific test run
         timing_df["proposal"] = prop
         timing_df["iteration"] = iteration
-        
+
         # Add sequence number for operations within this iteration
         timing_df["operation_sequence"] = range(1, len(timing_df) + 1)
 
         # Keep all original columns and metadata - no time difference calculations
-        log_message(f"Collected {len(timing_df)} raw timing measurements for {prop} iteration {iteration}")
-        
+        log_message(
+            f"Collected {len(timing_df)} raw timing measurements for {prop} iteration {iteration}"
+        )
+
         # Log the methods captured for debugging
         methods_found = timing_df["method"].unique().tolist()
         log_message(f"Methods captured: {methods_found}")
-        
+
         return timing_df
 
     except Exception as e:
@@ -696,7 +700,9 @@ def main():
     df_counters = pd.DataFrame()  # For request/response counts
     df_latencies = pd.DataFrame()  # For latency measurements
     df_plugin_timing = pd.DataFrame()  # For aggregated plugin timing
-    df_raw_plugin_timing = pd.DataFrame()  # For raw individual plugin timing measurements
+    df_raw_plugin_timing = (
+        pd.DataFrame()
+    )  # For raw individual plugin timing measurements
 
     # Establish connection with Bob
     conn, server_socket = establish_connection(HOST, PORT, NUM_ITERATIONS, log_message)
@@ -718,12 +724,12 @@ def main():
         for i in range(1, NUM_ITERATIONS + 1):
             reset_timing_log(PLUGIN_TIMING_LOG, log_message)
             run_test_iteration(i, NUM_ITERATIONS, conn, log_message)
-            
+
             # Collect raw plugin timing data for this iteration
             raw_timing_data = collect_raw_plugin_timing_data(
                 PLUGIN_TIMING_LOG, prop, i, log_message
             )
-            
+
             # Append to the master raw timing DataFrame
             if not raw_timing_data.empty:
                 df_raw_plugin_timing = pd.concat(
