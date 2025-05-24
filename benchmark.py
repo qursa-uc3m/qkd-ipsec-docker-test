@@ -370,7 +370,7 @@ class QKDTestOrchestrator:
             up_cmd = ["docker-compose", "-f", compose_file, "up", "-d"]
             self._run_docker_command(up_cmd, env=env)
             print("Containers started. Waiting for them to initialize...")
-            time.sleep(10)
+            time.sleep(5)
 
             # Verify containers are running
             status, _ = self._get_container_status()
@@ -386,7 +386,7 @@ class QKDTestOrchestrator:
                 raise Exception("Both container start and build attempts failed")
 
             print("Waiting for containers to start...")
-            time.sleep(10)
+            time.sleep(1)
             return True
         except Exception as up_error:
             print(f"Starting containers failed: {up_error}")
@@ -400,7 +400,7 @@ class QKDTestOrchestrator:
                 raise Exception("Both container start and build attempts failed")
 
             print("Waiting for containers to start...")
-            time.sleep(10)
+            time.sleep(1)
             return True
 
     def _show_manual_startup_instructions(self):
@@ -866,15 +866,6 @@ class QKDTestOrchestrator:
 
         self._run_docker_command(analysis_cmd)
         print(f"Analysis completed! Results available in {self.dirs['analysis_dir']}")
-
-    def _prepare_containers(self, build_flag, detached, no_cache):
-        """Prepare containers by building and starting them."""
-        print("Building and starting containers...")
-        # Use the cache setting from config unless explicitly overridden
-        use_cache = no_cache if build_flag else self.use_cache
-        return self.setup_environment(
-            build_only=False, detached=detached, no_cache=not use_cache
-        )
 
     def _prompt_container_shutdown(self):
         """Ask user if they want to stop containers."""

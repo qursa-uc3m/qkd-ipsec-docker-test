@@ -84,7 +84,9 @@ def calculate_timing_metrics(df):
     results = []
 
     # Group by proposal and iteration
-    for (proposal, iteration), group in df.groupby(["proposal", "iteration"]):
+    for (proposal, iteration), group in df.groupby(
+        ["proposal", "iteration"], sort=False
+    ):
         # Sort by operation_sequence to ensure correct order
         group = group.sort_values("operation_sequence")
 
@@ -149,15 +151,29 @@ def aggregate_timing_statistics(timing_df):
 
 
 def plot_boxplot_with_scatter(
-    timing_df, stats_df, title, ylabel, output_path, color_palette=None
+    timing_df, title, ylabel, output_path, color_palette=None, log_scale=False
 ):
     """
     Create a boxplot with scatter points overlay, matching the reference style
+
+    Args:
+        timing_df: DataFrame with timing data
+        title: Plot title
+        ylabel: Y-axis label
+        output_path: Output file path
+        color_palette: Color palette to use
+        log_scale: If True, use logarithmic y-axis scale
     """
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
     fig, ax = plt.subplots(figsize=(11, 6))
+
+    # Set logarithmic scale if requested
+    if log_scale:
+        ax.set_yscale("log")
+        # Update ylabel to indicate log scale
+        ylabel = f"{ylabel} (log scale)"
 
     # Set grid behind the data
     ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
@@ -165,8 +181,6 @@ def plot_boxplot_with_scatter(
 
     # Prepare data for boxplot
     proposals = timing_df["proposal"].unique()
-    # Sort proposals to match the order in stats_df
-    proposals = stats_df["proposal"].values
 
     # Create list of arrays for boxplot
     data_arrays = []
@@ -186,7 +200,6 @@ def plot_boxplot_with_scatter(
         widths=0.6,
         patch_artist=True,
         showfliers=False,
-        # MODIFIED LINE: Change facecolor to white and adjust alpha for transparency
         boxprops=dict(facecolor="white", alpha=0.3, linewidth=1.2),
         whiskerprops=dict(linewidth=1.2),
         capprops=dict(linewidth=1.2),
@@ -197,8 +210,6 @@ def plot_boxplot_with_scatter(
     for i, (proposal, data) in enumerate(zip(proposals, data_arrays)):
         # Add jitter to x-coordinates for better visibility
         x = np.random.normal(i, 0.04, size=len(data))
-        # You might want to make scatter points more visible if boxes are transparent
-        # For example, use a color from the palette or a darker color
         ax.scatter(
             x,
             data,
@@ -232,6 +243,7 @@ def plot_network_conditions_comparison(
     ylabel,
     output_path,
     color_palette=None,
+    log_scale=False,
 ):
     """
     Create a boxplot comparing different network conditions for each proposal
@@ -246,20 +258,20 @@ def plot_network_conditions_comparison(
     ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
     ax.set_axisbelow(True)
 
+    if log_scale:
+        ax.set_yscale("log")
+        ylabel = f"{ylabel} (log scale)"
+
     # Setup positions
     n_conditions = len(network_conditions)
     n_proposals = len(proposals)
     width = 0.8 / n_conditions  # Width of each box
-    group_width = 0.9  # Total width for each proposal group
 
     # Colors for different network conditions
     colors = [
         color_palette[i]
         for i in np.linspace(0, len(color_palette) - 1, n_conditions, dtype=int)
     ]
-
-    all_positions = []
-    all_labels = []
 
     for i, proposal in enumerate(proposals):
         base_pos = i * 1.0  # Base position for this proposal
@@ -269,9 +281,7 @@ def plot_network_conditions_comparison(
             pos = base_pos + (j - n_conditions / 2 + 0.5) * width
 
             # Get data for this proposal and condition
-            data_key = (
-                f"{proposal}||{condition}"  # Use || as separator to avoid conflicts
-            )
+            data_key = f"{proposal}||{condition}"
             if data_key in all_data:
                 data = all_data[data_key]
 
@@ -328,7 +338,14 @@ def plot_network_conditions_comparison(
 
 
 def create_timing_bar_chart(
-    stats_df, metric_column, std_column, title, ylabel, output_path, color_palette=None
+    stats_df,
+    metric_column,
+    std_column,
+    title,
+    ylabel,
+    output_path,
+    color_palette=None,
+    log_scale=False,
 ):
     """
     Create a bar chart with error bars for timing metrics
@@ -338,12 +355,36 @@ def create_timing_bar_chart(
 
     fig, ax = plt.subplots(figsize=(11, 6))
 
+    # Set logarithmic scale FIRST if requested
+    if log_scale:
+        ax.set_yscale("log")
+        # Modify ylabel to indicate log scale (avoid duplicates)
+        if "(log scale)" not in ylabel.lower():
+            ylabel = f"{ylabel} (log scale)"
+
     # Set grid behind the data
     ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
     ax.set_axisbelow(True)
 
     # Create bar positions
     x = np.arange(len(stats_df))
+
+    # For log scale, we need to handle error bars differently
+    if log_scale:
+        # In log scale, error bars should be multiplicative, not additive
+        # Convert to log space for proper error bar calculation
+        means = stats_df[metric_column].values
+        stds = stats_df[std_column].values
+
+        # Calculate asymmetric error bars for log scale
+        lower_errors = means - np.maximum(
+            means - stds, means * 0.1
+        )  # Prevent going to 0 or negative
+        upper_errors = (means + stds) - means
+
+        error_bars = [lower_errors, upper_errors]
+    else:
+        error_bars = stats_df[std_column]
 
     # Create bars with error bars
     bars = ax.bar(
@@ -369,6 +410,15 @@ def create_timing_bar_chart(
         zip(bars, stats_df[metric_column], stats_df[std_column])
     ):
         height = bar.get_height()
+
+        # Position text appropriately for log/linear scale
+        if log_scale:
+            # For log scale, position text as a ratio above the bar
+            text_y = height * 1.1
+        else:
+            # For linear scale, position text with fixed offset
+            text_y = height + std + max(stats_df[metric_column]) * 0.01
+
         ax.text(
             bar.get_x() + bar.get_width() / 2.0,
             height + std + max(stats_df[metric_column]) * 0.01,
@@ -594,13 +644,16 @@ def load_network_condition_data(result_dirs):
     return all_data, network_conditions
 
 
-def analyze_network_conditions(result_dirs, output_dir="analysis_network_comparison"):
+def analyze_network_conditions(
+    result_dirs, output_dir="analysis_network_comparison", log_scale=False
+):
     """
     Analyze and compare plugin timing across different network conditions
 
     Args:
         result_dirs: List of directories containing test results for different network conditions
         output_dir: Output directory for analysis results
+        log_scale: If True, use logarithmic scale for comparison plot
     """
     # Set up matplotlib styling
     color_palette = setup_matplotlib_styling()
@@ -634,6 +687,7 @@ def analyze_network_conditions(result_dirs, output_dir="analysis_network_compari
         "Time (milliseconds)",
         comparison_plot_path,
         color_palette,
+        log_scale=log_scale,
     )
     print(f"Created comparison plot: {comparison_plot_path}")
 
@@ -687,9 +741,14 @@ def analyze_network_conditions(result_dirs, output_dir="analysis_network_compari
     return True
 
 
-def analyze_plugin_timing(raw_csv_file, output_dir="analysis"):
-    """Main analysis function for plugin timing data"""
+def analyze_plugin_timing(raw_csv_file, output_dir="analysis", log_scale=False):
+    """Main analysis function for plugin timing data
 
+    Args:
+        raw_csv_file: Path to raw CSV file
+        output_dir: Output directory for results
+        log_scale: If True, use logarithmic scale for boxplots
+    """
     # Set up matplotlib styling
     color_palette = setup_matplotlib_styling()
 
@@ -727,11 +786,11 @@ def analyze_plugin_timing(raw_csv_file, output_dir="analysis"):
     total_plugin_boxplot = f"{output_dir}/total_plugin_time_boxplot.pdf"
     plot_boxplot_with_scatter(
         timing_df,
-        stats_df,
         f'Total Plugin Time by Proposal (N={int(stats_df["num_iterations"].iloc[0])})',
         "Time (milliseconds)",
         total_plugin_boxplot,
         color_palette,
+        log_scale=log_scale,
     )
     print(f"Created total plugin time boxplot: {total_plugin_boxplot}")
 
@@ -777,17 +836,25 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage:")
         print(
-            "  Single file mode: python analyze_plugin_timing.py <raw_timing_csv> [<output_dir>]"
+            "  Single file mode: python analyze_plugin_timing.py <raw_timing_csv> [<output_dir>] [--log-scale]"
         )
         print(
-            "  Network comparison mode: python analyze_plugin_timing.py --network-compare <dir1> <dir2> ... [--output <output_dir>]"
+            "  Network comparison mode: python analyze_plugin_timing.py --network-compare <dir1> <dir2> ... [--output <output_dir>] [--log-scale]"
         )
         print("\nExamples:")
         print("  python analyze_plugin_timing.py timing_data.csv analysis_output")
         print(
-            "  python analyze_plugin_timing.py --network-compare lat0_jit0_loss1_iter30_* lat100_jit0_loss0_iter30_* --output network_analysis"
+            "  python analyze_plugin_timing.py timing_data.csv analysis_output --log-scale"
+        )
+        print(
+            "  python analyze_plugin_timing.py --network-compare lat0_* lat100_* --output network_analysis --log-scale"
         )
         sys.exit(1)
+
+    # Check for log-scale flag
+    log_scale = "--log-scale" in sys.argv
+    if log_scale:
+        sys.argv.remove("--log-scale")  # Remove it from argv for easier parsing
 
     if sys.argv[1] == "--network-compare":
         # Network comparison mode
@@ -812,7 +879,9 @@ if __name__ == "__main__":
             sys.exit(1)
 
         # Run network conditions analysis
-        success = analyze_network_conditions(result_dirs, output_dir)
+        success = analyze_network_conditions(
+            result_dirs, output_dir, log_scale=log_scale
+        )
     else:
         # Single file mode
         csv_file = sys.argv[1]
