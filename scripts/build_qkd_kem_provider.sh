@@ -31,7 +31,7 @@ cmake -GNinja \
     -DOQS_BUILD_ONLY_LIB=ON \
     ..
 
-ninja
+ninja -j$(nproc)
 ninja install
 cd /
 rm -rf /tmp/liboqs

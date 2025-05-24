@@ -64,7 +64,7 @@ COPY qkd_certs /qkd_certs
 
 # Clone and build QKD ETSI API if requested
 RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper.git /qkd-etsi-api-c-wrapper; \
+    git clone --depth 1 https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper.git /qkd-etsi-api-c-wrapper; \
     fi
 
 # Copy build and environment scripts
@@ -80,7 +80,7 @@ RUN if [ "$BUILD_QKD_ETSI" = "true" ]; then \
 
 # Build QKD KEM provider if requested
 RUN if [ "$BUILD_QKD_KEM" = "true" ]; then \
-    git clone https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider; \
+    git clone --depth 1 https://github.com/qursa-uc3m/qkd-kem-provider.git /qkd-kem-provider && \
     ETSI_API_VERSION=${ETSI_API_VERSION} /build_qkd_kem_provider.sh; \
 else \
     /build_liboqs.sh; \
@@ -101,10 +101,7 @@ RUN mkdir -p /output
 
 # Clone and build StrongSwan from GitHub using 6.0.0beta6 tag
 WORKDIR /
-RUN git clone https://github.com/strongswan/strongswan.git /strongswan && \
-    cd /strongswan && \
-    git checkout ${STRONGSWAN_VERSION} && \
-    cd /
+RUN git clone --depth 1 --branch ${STRONGSWAN_VERSION} https://github.com/strongswan/strongswan.git /strongswan
 
 # Apply timing hooks to strongSwan
 RUN python3 /add_timing_hooks.py /strongswan
@@ -115,8 +112,7 @@ RUN /build_strongswan.sh
 
 # Clone and build external QKD plugins from GitHub
 WORKDIR /
-RUN git clone https://github.com/qursa-uc3m/qkd-plugins-strongswan.git /qkd-plugins-strongswan && \
-    cd /qkd-plugins-strongswan
+RUN git clone --depth 1 https://github.com/qursa-uc3m/qkd-plugins-strongswan.git /qkd-plugins-strongswan
 
 WORKDIR /qkd-plugins-strongswan
 RUN autoreconf -i && \

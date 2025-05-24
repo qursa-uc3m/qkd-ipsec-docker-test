@@ -24,7 +24,7 @@ cmake -GNinja \
       ..
 
 # Build
-ninja
+ninja -j$(nproc)
 
 # Install the library
 ninja install

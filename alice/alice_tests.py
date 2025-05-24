@@ -182,7 +182,7 @@ def run_test_iteration(i, num_iterations, conn, log_message):
 
     log_message("Executing strongSwan...")
     strongswan_proc = run_cmd("/charon", start_new_session=True)
-    time.sleep(3)  # Waiting 'charon' to be ready
+    time.sleep(2)  # Waiting 'charon' to be ready
 
     log_message("Starting strongSwan SA...")
     init_output = run_cmd("swanctl --initiate --child net", capture_output=True)
@@ -190,11 +190,11 @@ def run_test_iteration(i, num_iterations, conn, log_message):
     if init_output.stdout:
         log_message(init_output.stdout)
 
-    time.sleep(3)
+    time.sleep(2)
 
     log_message("Stop strongSwan...")
     subprocess.run(["pkill", "-f", "charon"])
-    time.sleep(1)
+    time.sleep(0.5)
 
     # Add a separator after StrongSwan output
     log_message("\n----- StrongSwan Output End -----\n")
