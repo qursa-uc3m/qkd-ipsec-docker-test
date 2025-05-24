@@ -51,9 +51,7 @@ class QKDTestOrchestrator:
         )
 
         # Get build settings with defaults
-        self.rebuild = (
-            self.config.get("docker", {}).get("build", {}).get("rebuild", False)
-        )
+        self.build = self.config.get("docker", {}).get("build", {}).get("build", False)
         self.use_cache = (
             self.config.get("docker", {}).get("build", {}).get("use_cache", True)
         )
@@ -121,6 +119,10 @@ class QKDTestOrchestrator:
         etsi_version_changed = False
         backend_changed = False
 
+        if hasattr(args, "build") and args.build:
+            print("CLI --build flag provided, overriding YAML build setting")
+            self.build = True
+
         # ETSI version and backend overrides (if provided)
         if args.etsi_version is not None:
             self.config["docker"]["qkd"]["etsi_api_version"] = args.etsi_version
@@ -149,6 +151,9 @@ class QKDTestOrchestrator:
 
         if args.packet_loss is not None:
             self.config["test"]["network"]["packet_loss"] = args.packet_loss
+
+        if hasattr(args, "duration") and args.duration is not None:
+            self.config["test"]["network"]["duration"] = args.duration
 
         if args.no_analyze:
             self.config["test"]["analyze_results"] = False
@@ -250,6 +255,7 @@ class QKDTestOrchestrator:
                 "latency_ms": network_config["latency"],
                 "jitter_ms": network_config["jitter"],
                 "packet_loss_percent": network_config["packet_loss"],
+                "duration": network_config["duration"],
             },
             "container_network": {"alice_ip": self.alice_ip, "bob_ip": self.bob_ip},
         }
@@ -334,28 +340,18 @@ class QKDTestOrchestrator:
 
     def check_containers(self):
         """Check if Docker containers are running and start them if needed."""
-        # If rebuild is enabled, always rebuild regardless of current state
-        if self.rebuild:
-            print("Rebuild is enabled - forcing container rebuild")
-            return self.setup_environment(
-                build_only=False, detached=True, no_cache=not self.use_cache
-            )
-
         try:
             # Check if containers exist and are running
             status, containers = self._get_container_status()
 
             if status == "running":
-                # Both containers are running
                 print("Docker containers are running")
                 return True
 
             elif status == "exists":
-                # Containers exist but are not running
                 return self._start_existing_containers(containers)
 
             elif status == "not_found":
-                # Containers don't exist
                 return self._start_or_build_containers()
 
         except Exception as e:
@@ -633,11 +629,12 @@ class QKDTestOrchestrator:
         latency = self.config["test"]["network"]["latency"]
         jitter = self.config["test"]["network"]["jitter"]
         packet_loss = self.config["test"]["network"]["packet_loss"]
+        duration = self.config["test"]["network"]["duration"]
 
         print("Applying network conditions for testing...")
         print(f"  - Latency: {latency}ms with {jitter}ms jitter")
         print(f"  - Packet loss: {packet_loss}%")
-        print(f"  - Duration: indefinite (will be stopped manually after tests)")
+        print(f"  - Duration: {duration}")
         print(
             f"  - Only affecting traffic between Alice ({self.alice_ip}) and Bob ({self.bob_ip})"
         )
@@ -656,6 +653,8 @@ class QKDTestOrchestrator:
             "netem",
             "--tc-image",
             "ghcr.io/alexei-led/pumba-alpine-nettools:latest",
+            "--duration",
+            duration,
             "--interface",
             "eth0",
         ]
@@ -868,12 +867,6 @@ class QKDTestOrchestrator:
         self._run_docker_command(analysis_cmd)
         print(f"Analysis completed! Results available in {self.dirs['analysis_dir']}")
 
-    def _should_rebuild_containers(self, build_flag):
-        """Determine if containers should be rebuilt."""
-        if build_flag or self.rebuild:
-            return True
-        return False
-
     def _prepare_containers(self, build_flag, detached, no_cache):
         """Prepare containers by building and starting them."""
         print("Building and starting containers...")
@@ -898,19 +891,26 @@ class QKDTestOrchestrator:
             else:
                 print("Please enter 'y' or 'n'.")
 
-    def execute_workflow(self, build=False, detached=False, no_cache=False):
+    def execute_workflow(self, no_cache=False):
         """Execute the complete testing workflow with proper cleanup."""
         try:
             # Clean up any existing Pumba containers first
             self._cleanup_all_pumba_containers()
 
-            # Setup environment if needed
-            if self._should_rebuild_containers(build):
-                if not self._prepare_containers(build, detached, no_cache):
+            if self.build:
+                print("Rebuild requested - building containers from scratch")
+                if not self.setup_environment(
+                    build_only=False, detached=True, no_cache=no_cache
+                ):
                     print("Container preparation failed. Exiting.")
                     return 1
+            else:
+                # Only check containers if not rebuilding
+                if not self.check_containers():
+                    print("Cannot proceed without running containers.")
+                    return 1
 
-            # Run tests
+            # Run tests (containers are now guaranteed to be running)
             self.run_tests()
 
             # Analyze results if enabled
@@ -931,7 +931,6 @@ class QKDTestOrchestrator:
             self._cleanup_pumba_containers()
             return 1
         finally:
-            # Final cleanup to ensure no Pumba containers are left running
             self._cleanup_pumba_containers()
 
 
@@ -947,7 +946,7 @@ def parse_arguments():
     parser.add_argument(
         "--build",
         action="store_true",
-        help="Build and start the Docker environment before testing",
+        help="Force rebuild of Docker containers from scratch (same as build: true in YAML)",
     )
     parser.add_argument(
         "--detached",
@@ -997,6 +996,11 @@ def parse_arguments():
         "--packet-loss", "-p", type=int, help="Override packet loss percentage"
     )
     parser.add_argument(
+        "--duration",
+        type=str,
+        help="Override network conditions duration (e.g., '20m', '1h', '180m')",
+    )
+    parser.add_argument(
         "--alice-ip",
         type=str,
         help=f"Override Alice's IP address (default: {DEFAULT_ALICE_IP})",
@@ -1013,8 +1017,4 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     orchestrator = QKDTestOrchestrator(config_file=args.config, cli_args=args)
-    sys.exit(
-        orchestrator.execute_workflow(
-            build=args.build, detached=args.detached, no_cache=args.no_cache
-        )
-    )
+    sys.exit(orchestrator.execute_workflow(no_cache=args.no_cache))

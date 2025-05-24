@@ -30,10 +30,10 @@ test:
     latency: 100             # Milliseconds
     jitter: 0                # Milliseconds
     packet_loss: 5           # Percentage
-    duration: "15m"          # Duration string
+    duration: "180m"          # Duration string
 
   # Test iterations
-  iterations: 2
+  iterations: 15
   
   # Analysis options
   analyze_results: true
