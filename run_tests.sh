@@ -4,13 +4,13 @@
 set -e  # Exit on error
 
 # Default configuration
-ITERATIONS=20
+ITERATIONS=10
 ANALYZE_RESULTS=true
 APPLY_NETWORK_CONDITIONS=true
-NETWORK_DURATION="15m"  # Duration should exceed your test time
-LATENCY=100  # ms
+NETWORK_DURATION="30m"  # Duration should exceed your test time
+LATENCY=500  # ms
 JITTER=0   # ms
-PACKET_LOSS=5  # percent
+PACKET_LOSS=0  # percent
 
 # Get API version from environment or default to 014
 ETSI_API_VERSION=${ETSI_API_VERSION:-014}
@@ -105,47 +105,69 @@ echo "Results will be stored in $OUTPUT_DIR/"
 
 # Apply network conditions if enabled
 if [ "$APPLY_NETWORK_CONDITIONS" = true ]; then
+  echo "Discovering network interfaces..."
+  
+  # Discover the correct network interfaces
+  ALICE_INTERFACE=$(docker exec alice ip route get ${BOB_IP} | grep -oP 'dev \K\S+' | head -1)
+  BOB_INTERFACE=$(docker exec bob ip route get ${ALICE_IP} | grep -oP 'dev \K\S+' | head -1)
+  
+  echo "  - Alice communicates with Bob via interface: ${ALICE_INTERFACE}"
+  echo "  - Bob communicates with Alice via interface: ${BOB_INTERFACE}"
+  
+  # Verify we found the interfaces
+  if [ -z "$ALICE_INTERFACE" ] || [ -z "$BOB_INTERFACE" ]; then
+    echo "ERROR: Could not determine network interfaces!"
+    exit 1
+  fi
+  
   echo "Applying network conditions for testing..."
   echo "  - Latency: ${LATENCY}ms with ${JITTER}ms jitter"
   echo "  - Packet loss: ${PACKET_LOSS}%"
   echo "  - Duration: ${NETWORK_DURATION}"
   echo "  - Only affecting traffic between Alice (${ALICE_IP}) and Bob (${BOB_IP})"
   
-  # Apply latency to Alice's outgoing traffic to Bob only
+  # Clean up any existing Pumba containers
+  docker ps -q --filter "ancestor=gaiaadm/pumba" | xargs -r docker kill 2>/dev/null || true
+  
+  # Apply latency to the CORRECT interfaces
+  echo "Applying delay to Alice's ${ALICE_INTERFACE} interface..."
   docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
     gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
     --duration "${NETWORK_DURATION}" \
-    --interface eth0 \
+    --interface "${ALICE_INTERFACE}" \
     --target "${BOB_IP}" \
     delay --time "${LATENCY}" --jitter "${JITTER}" --distribution normal \
     alice
   
-  # Apply latency to Bob's outgoing traffic to Alice only
+  echo "Applying delay to Bob's ${BOB_INTERFACE} interface..."
   docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
     gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
     --duration "${NETWORK_DURATION}" \
-    --interface eth0 \
+    --interface "${BOB_INTERFACE}" \
     --target "${ALICE_IP}" \
     delay --time "${LATENCY}" --jitter "${JITTER}" --distribution normal \
     bob
   
-  # Apply packet loss to Alice's outgoing traffic to Bob only
-  docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
-    gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
-    --duration "${NETWORK_DURATION}" \
-    --interface eth0 \
-    --target "${BOB_IP}" \
-    loss --percent "${PACKET_LOSS}" --correlation 20 \
-    alice
-  
-  # Apply packet loss to Bob's outgoing traffic to Alice only
-  docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
-    gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
-    --duration "${NETWORK_DURATION}" \
-    --interface eth0 \
-    --target "${ALICE_IP}" \
-    loss --percent "${PACKET_LOSS}" --correlation 20 \
-    bob
+  # Apply packet loss if specified
+  if [ "${PACKET_LOSS}" -gt 0 ]; then
+    echo "Applying ${PACKET_LOSS}% packet loss..."
+    
+    docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
+      gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
+      --duration "${NETWORK_DURATION}" \
+      --interface "${ALICE_INTERFACE}" \
+      --target "${BOB_IP}" \
+      loss --percent "${PACKET_LOSS}" --correlation 20 \
+      alice
+    
+    docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock \
+      gaiaadm/pumba netem --tc-image ghcr.io/alexei-led/pumba-alpine-nettools:latest \
+      --duration "${NETWORK_DURATION}" \
+      --interface "${BOB_INTERFACE}" \
+      --target "${ALICE_IP}" \
+      loss --percent "${PACKET_LOSS}" --correlation 20 \
+      bob
+  fi
   
   # Give a moment for network conditions to apply
   echo "Waiting for network conditions to be applied..."
@@ -160,13 +182,19 @@ docker exec alice bash -c "chmod -R 777 ${DOCKER_OUTPUT_DIR} && source /set_env.
 
 echo "Tests completed. Results accessible in $OUTPUT_DIR/"
 
+# Clean up Pumba containers
+if [ "$APPLY_NETWORK_CONDITIONS" = true ]; then
+  echo "Cleaning up Pumba containers..."
+  docker ps -q --filter "ancestor=gaiaadm/pumba" | xargs -r docker kill 2>/dev/null || true
+fi
+
 # Run analysis if not disabled
 if [ "$ANALYZE_RESULTS" = true ]; then
   echo "Analyzing results..."
   ANALYSIS_DIR="./analysis/${RELATIVE_DIR}"
   mkdir -p "${ANALYSIS_DIR}"
   
-  python3 analyze_results.py "${OUTPUT_DIR}/plugin_timing_raw.csv" "${ANALYSIS_DIR}" --log-scale
+  python3 analyze_results.py "${OUTPUT_DIR}/plugin_timing_raw.csv" "${ANALYSIS_DIR}"
   echo "Analysis completed! Results available in ${ANALYSIS_DIR}"
 fi
 

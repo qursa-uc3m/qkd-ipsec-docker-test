@@ -619,8 +619,30 @@ class QKDTestOrchestrator:
             # No existing Pumba containers found
             pass
 
+    def _discover_interface(self, container_name, target_ip):
+        """Discover which network interface a container uses to reach a target IP."""
+        try:
+            result = self._execute_container_command(
+                container_name, f"ip route get {target_ip}"
+            )
+            output = result.output.decode().strip()
+
+            # Extract interface name using regex
+            import re
+
+            match = re.search(r"dev\s+(\S+)", output)
+            if match:
+                return match.group(1)
+            else:
+                print(f"Warning: Could not parse interface from route output: {output}")
+                return None
+
+        except Exception as e:
+            print(f"Error discovering interface for {container_name}: {e}")
+            return None
+
     def apply_network_conditions(self):
-        """Apply network conditions using Pumba and track containers."""
+        """Apply network conditions using Pumba with automatic interface discovery."""
         if not self.config["test"]["network"]["apply"]:
             print("Network conditions disabled. Skipping...")
             return
@@ -642,6 +664,17 @@ class QKDTestOrchestrator:
         # Clear any existing Pumba containers from previous runs
         self._cleanup_pumba_containers()
 
+        # Discover the correct network interfaces
+        alice_interface = self._discover_interface("alice", self.bob_ip)
+        bob_interface = self._discover_interface("bob", self.alice_ip)
+
+        if not alice_interface or not bob_interface:
+            print("ERROR: Could not determine network interfaces!")
+            raise RuntimeError("Interface discovery failed")
+
+        print(f"  - Alice communicates with Bob via interface: {alice_interface}")
+        print(f"  - Bob communicates with Alice via interface: {bob_interface}")
+
         pumba_base = [
             "docker",
             "run",
@@ -655,109 +688,129 @@ class QKDTestOrchestrator:
             "ghcr.io/alexei-led/pumba-alpine-nettools:latest",
             "--duration",
             duration,
-            "--interface",
-            "eth0",
         ]
 
         try:
-            # Apply latency to Alice's outgoing traffic to Bob
-            latency_alice = pumba_base + [
-                "--target",
-                self.bob_ip,
-                "delay",
-                "--time",
-                str(latency),
-                "--jitter",
-                str(jitter),
-                "--distribution",
-                "normal",
-                "alice",
-            ]
-            result = subprocess.run(
-                latency_alice, check=True, capture_output=True, text=True
-            )
-            alice_container_id = result.stdout.strip()
-            if alice_container_id:
-                self.pumba_containers.append(alice_container_id)
+            if latency > 0:
+                # Apply latency to Alice's outgoing traffic to Bob
+                latency_alice = pumba_base + [
+                    "--interface",
+                    alice_interface,
+                    "--target",
+                    self.bob_ip,
+                    "delay",
+                    "--time",
+                    str(latency),
+                    "--jitter",
+                    str(jitter),
+                    "--distribution",
+                    "normal",
+                    "alice",
+                ]
+                result = subprocess.run(
+                    latency_alice, check=True, capture_output=True, text=True
+                )
+                alice_container_id = result.stdout.strip()
+                if alice_container_id:
+                    self.pumba_containers.append(alice_container_id)
+                    print(
+                        f"Started Pumba container for Alice latency: {alice_container_id[:12]}"
+                    )
+
+                # Apply latency to Bob's outgoing traffic to Alice
+                latency_bob = pumba_base + [
+                    "--interface",
+                    bob_interface,
+                    "--target",
+                    self.alice_ip,
+                    "delay",
+                    "--time",
+                    str(latency),
+                    "--jitter",
+                    str(jitter),
+                    "--distribution",
+                    "normal",
+                    "bob",
+                ]
+                result = subprocess.run(
+                    latency_bob, check=True, capture_output=True, text=True
+                )
+                bob_container_id = result.stdout.strip()
+                if bob_container_id:
+                    self.pumba_containers.append(bob_container_id)
+                    print(
+                        f"Started Pumba container for Bob latency: {bob_container_id[:12]}"
+                    )
+            else:
                 print(
-                    f"Started Pumba container for Alice latency: {alice_container_id[:12]}"
+                    "No latency specified (latency = 0), skipping latency application"
                 )
 
-            # Apply latency to Bob's outgoing traffic to Alice
-            latency_bob = pumba_base + [
-                "--target",
-                self.alice_ip,
-                "delay",
-                "--time",
-                str(latency),
-                "--jitter",
-                str(jitter),
-                "--distribution",
-                "normal",
-                "bob",
-            ]
-            result = subprocess.run(
-                latency_bob, check=True, capture_output=True, text=True
-            )
-            bob_container_id = result.stdout.strip()
-            if bob_container_id:
-                self.pumba_containers.append(bob_container_id)
-                print(
-                    f"Started Pumba container for Bob latency: {bob_container_id[:12]}"
-                )
+            # Apply packet loss if specified
+            if packet_loss > 0:
+                print(f"Applying {packet_loss}% packet loss...")
 
-            # Apply packet loss to Alice's outgoing traffic to Bob
-            loss_alice = pumba_base + [
-                "--target",
-                self.bob_ip,
-                "loss",
-                "--percent",
-                str(packet_loss),
-                "--correlation",
-                "20",
-                "alice",
-            ]
-            result = subprocess.run(
-                loss_alice, check=True, capture_output=True, text=True
-            )
-            alice_loss_id = result.stdout.strip()
-            if alice_loss_id:
-                self.pumba_containers.append(alice_loss_id)
-                print(
-                    f"Started Pumba container for Alice packet loss: {alice_loss_id[:12]}"
+                # Apply packet loss to Alice's outgoing traffic to Bob
+                loss_alice = pumba_base + [
+                    "--interface",
+                    alice_interface,
+                    "--target",
+                    self.bob_ip,
+                    "loss",
+                    "--percent",
+                    str(packet_loss),
+                    "--correlation",
+                    "20",
+                    "alice",
+                ]
+                result = subprocess.run(
+                    loss_alice, check=True, capture_output=True, text=True
                 )
+                alice_loss_id = result.stdout.strip()
+                if alice_loss_id:
+                    self.pumba_containers.append(alice_loss_id)
+                    print(
+                        f"Started Pumba container for Alice packet loss: {alice_loss_id[:12]}"
+                    )
 
-            # Apply packet loss to Bob's outgoing traffic to Alice
-            loss_bob = pumba_base + [
-                "--target",
-                self.alice_ip,
-                "loss",
-                "--percent",
-                str(packet_loss),
-                "--correlation",
-                "20",
-                "bob",
-            ]
-            result = subprocess.run(
-                loss_bob, check=True, capture_output=True, text=True
-            )
-            bob_loss_id = result.stdout.strip()
-            if bob_loss_id:
-                self.pumba_containers.append(bob_loss_id)
+                # Apply packet loss to Bob's outgoing traffic to Alice
+                loss_bob = pumba_base + [
+                    "--interface",
+                    bob_interface,
+                    "--target",
+                    self.alice_ip,
+                    "loss",
+                    "--percent",
+                    str(packet_loss),
+                    "--correlation",
+                    "20",
+                    "bob",
+                ]
+                result = subprocess.run(
+                    loss_bob, check=True, capture_output=True, text=True
+                )
+                bob_loss_id = result.stdout.strip()
+                if bob_loss_id:
+                    self.pumba_containers.append(bob_loss_id)
+                    print(
+                        f"Started Pumba container for Bob packet loss: {bob_loss_id[:12]}"
+                    )
+            else:
                 print(
-                    f"Started Pumba container for Bob packet loss: {bob_loss_id[:12]}"
+                    "No packet loss specified (packet_loss = 0), skipping packet loss application"
                 )
 
             print(f"Total Pumba containers started: {len(self.pumba_containers)}")
-
-            # Wait for network conditions to apply
-            print("Waiting for network conditions to be applied...")
-            time.sleep(5)
+            # Only wait if we actually started some containers
+            if self.pumba_containers:
+                print("Waiting for network conditions to be applied...")
+                time.sleep(5)
+            else:
+                print("No network conditions applied - no Pumba containers started")
 
         except subprocess.CalledProcessError as e:
             print(f"Error applying network conditions: {e}")
             print(f"Error output: {e.stderr if e.stderr else 'No stderr'}")
-            # Clean up any containers that were started
             self._cleanup_pumba_containers()
             raise
 
