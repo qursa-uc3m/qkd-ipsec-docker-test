@@ -570,10 +570,11 @@ def load_network_condition_data(result_dirs):
         result_dirs: List of directory paths containing test results
 
     Returns:
-        Dictionary with combined data and network condition labels
+        Dictionary with combined data, network condition labels, and ordered proposals list
     """
     all_data = {}
     network_conditions = []
+    proposal_order = None  # Will store the first encountered proposal order
 
     for result_dir in result_dirs:
         # Extract network condition from directory name
@@ -607,6 +608,11 @@ def load_network_condition_data(result_dirs):
             if df is not None:
                 timing_df = calculate_timing_metrics(df)
 
+                # Preserve proposal order from first file encountered
+                if proposal_order is None:
+                    # Get unique proposals in the order they first appear
+                    proposal_order = timing_df["proposal"].drop_duplicates().tolist()
+
                 # Store data for each proposal under this condition
                 for proposal in timing_df["proposal"].unique():
                     data_key = f"{proposal}||{condition_label}"  # Use || as separator
@@ -627,6 +633,13 @@ def load_network_condition_data(result_dirs):
                     df = load_raw_timing_data(alt_path)
                     if df is not None:
                         timing_df = calculate_timing_metrics(df)
+
+                        # Preserve proposal order from first file encountered
+                        if proposal_order is None:
+                            proposal_order = (
+                                timing_df["proposal"].drop_duplicates().tolist()
+                            )
+
                         for proposal in timing_df["proposal"].unique():
                             data_key = f"{proposal}||{condition_label}"
                             proposal_data = timing_df[
@@ -641,7 +654,7 @@ def load_network_condition_data(result_dirs):
                     f"  Could not find plugin_timing_raw.csv in {result_dir} or subdirectories"
                 )
 
-    return all_data, network_conditions
+    return all_data, network_conditions, proposal_order
 
 
 def analyze_network_conditions(
@@ -663,15 +676,22 @@ def analyze_network_conditions(
 
     # Load data from all directories
     print("Loading data from multiple network conditions...")
-    all_data, network_conditions = load_network_condition_data(result_dirs)
+    all_data, network_conditions, proposal_order = load_network_condition_data(
+        result_dirs
+    )
 
     if not all_data:
         print("Error: No data loaded from any directory")
         return False
 
-    # Extract unique proposals - use || separator
-    proposals = list(set([key.split("||")[0] for key in all_data.keys()]))
-    proposals.sort()  # Ensure consistent ordering
+    if proposal_order is None:
+        # Fallback to extracting proposals if order wasn't preserved
+        proposals = list(set([key.split("||")[0] for key in all_data.keys()]))
+        proposals.sort()  # Keep alphabetical as fallback
+        print("Warning: Could not preserve original proposal order, using alphabetical")
+    else:
+        proposals = proposal_order
+        print(f"Using original proposal order: {proposals}")
 
     print(f"Found proposals: {proposals}")
     print(f"Found network conditions: {network_conditions}")
