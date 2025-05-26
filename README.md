@@ -198,7 +198,7 @@ docker:
     strongswan_version: "6.0.0beta6"
     build_qkd_etsi: true
     build_qkd_kem: true
-    rebuild: true           # Always rebuild containers
+    build: true           # Always rebuild containers
     use_cache: false        # Don't use Docker cache
 
   qkd:

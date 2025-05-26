@@ -59,6 +59,7 @@ services:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
       - ./strongswan.conf:/etc/strongswan.conf
+      - ./benchmark_utils:/etc/swanctl/benchmark_utils
       - ./results:/output
       - ./qkd_certs:/qkd_certs
     networks:

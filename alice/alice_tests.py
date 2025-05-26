@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Copyright (C) 2024-2025 Javier Blanco-Romero @fj-blanco (UC3M, QURSA project)
+#
+# alice/alice_tests.py
 # Alice: Testing Script with Raw Plugin Timing Collection
 
 import argparse
@@ -8,6 +12,20 @@ import socket
 import subprocess
 import time
 import yaml
+
+from utils.utils import (
+    run_cmd,
+)  # Remove alice. prefix since you're running from alice/ directory
+from data_proc.plugin_proc import (
+    collect_raw_plugin_timing_data,
+    process_plugin_timing_data,
+    aggregate_plugin_timing,
+    generate_plugin_report,
+)
+from data_proc.pcap_proc import (
+    process_ike_data,
+    generate_pcap_report,
+)
 
 
 def parse_arguments():
@@ -105,29 +123,16 @@ def load_proposals(config_path, args, log_message=None):
     return proposals, esp_proposals, num_iterations
 
 
-def run_cmd(cmd, capture_output=False, start_new_session=False, input_data=None):
-    """Run a command with proper environment sourcing"""
-    # Prepend source command to ensure environment is loaded
-    full_cmd = f"source /set_env.sh && {cmd}"
+def capture_and_process_traffic(prop, output_dir, log_message):
+    """Capture network traffic and process IKE data for a proposal"""
+    ts_res = f"{output_dir}/capture_{prop}.pcap"
+    tshark_proc = run_cmd(
+        f"tshark -w {ts_res}", start_new_session=True, output_dir=output_dir
+    )
+    log_message("Capturing traffic with tshark...")
 
-    if cmd == "/charon":
-        # Use tee to capture the output to the log file
-        tee_cmd = f"{full_cmd} 2>&1 | tee -a {OUTPUT_DIR}/alice_log.txt"
-        return subprocess.Popen(["bash", "-c", tee_cmd], start_new_session=True)
-    # Run through bash to handle the source command
-    elif capture_output:
-        return subprocess.run(
-            ["bash", "-c", full_cmd], capture_output=True, text=True, input=input_data
-        )
-    elif start_new_session:
-        return subprocess.Popen(
-            ["bash", "-c", full_cmd],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    else:
-        return subprocess.run(["bash", "-c", full_cmd])
+    # Return the tshark process to be stopped later
+    return tshark_proc, ts_res
 
 
 def establish_connection(host, port, num_iterations, log_message):
@@ -181,11 +186,13 @@ def run_test_iteration(i, num_iterations, conn, log_message):
     log_message("\n----- StrongSwan Output Start -----\n")
 
     log_message("Executing strongSwan...")
-    strongswan_proc = run_cmd("/charon", start_new_session=True)
+    strongswan_proc = run_cmd("/charon", start_new_session=True, output_dir=OUTPUT_DIR)
     time.sleep(2)  # Waiting 'charon' to be ready
 
     log_message("Starting strongSwan SA...")
-    init_output = run_cmd("swanctl --initiate --child net", capture_output=True)
+    init_output = run_cmd(
+        "swanctl --initiate --child net", capture_output=True, output_dir=OUTPUT_DIR
+    )
     # Log the output of the swanctl command if available
     if init_output.stdout:
         log_message(init_output.stdout)
@@ -205,54 +212,6 @@ def run_test_iteration(i, num_iterations, conn, log_message):
     log_message("\n\n")
 
 
-def capture_and_process_traffic(prop, output_dir, log_message):
-    """Capture network traffic and process IKE data for a proposal"""
-    ts_res = f"{output_dir}/capture_{prop}.pcap"
-    tshark_proc = run_cmd(f"tshark -w {ts_res}", start_new_session=True)
-    log_message("Capturing traffic with tshark...")
-
-    # Return the tshark process to be stopped later
-    return tshark_proc, ts_res
-
-
-def process_ike_data(ts_res, output_dir, prop, log_message):
-    """Process IKE data from captured traffic"""
-    filter_ts = f"{output_dir}/results_{prop}.txt"
-    log_message("Extracting time data from IKE_SA_INIT messages...")
-    with open(filter_ts, "w") as result_file:
-        tshark_output = run_cmd(f"tshark -r {ts_res} -Y isakmp", capture_output=True)
-        filter_output = subprocess.run(
-            ["grep", "IKE_SA_INIT"],
-            input=tshark_output.stdout,
-            capture_output=True,
-            text=True,
-        )
-        result_file.write(filter_output.stdout)
-    log_message(f"Process completed. Data stored in {filter_ts}")
-
-    initiator_times = []
-    responder_times = []
-    init_request_count = 0
-    resp_response_count = 0
-
-    with open(filter_ts, "r") as file:
-        for line in file:
-            parts = line.split()
-            if len(parts) > 1:
-                hs_time = float(parts[1])
-                if "Initiator Request" in line:
-                    initiator_times.append(hs_time)
-                    init_request_count += 1
-                elif "Responder Response" in line:
-                    responder_times.append(hs_time)
-                    resp_response_count += 1
-
-    # Computing time differences
-    latencies = [resp - init for init, resp in zip(initiator_times, responder_times)]
-
-    return latencies, init_request_count, resp_response_count
-
-
 def reset_timing_log(log_file_path, log_message):
     try:
         with open(log_file_path, "w") as f:
@@ -264,409 +223,6 @@ def reset_timing_log(log_file_path, log_message):
     except Exception as e:
         log_message(f"Error initializing timing log: {e}")
         return False
-
-
-def collect_raw_plugin_timing_data(plugin_timing_log, prop, iteration, log_message):
-    """
-    Collect raw plugin timing data from temporary file for each iteration.
-    Preserves all individual creation/destruction events without calculating differences.
-
-    Args:
-        plugin_timing_log: Path to the plugin timing log file
-        prop: The cryptographic proposal being tested
-        iteration: The iteration number
-        log_message: Function for logging messages
-
-    Returns:
-        DataFrame with raw timing data, or empty DataFrame if no data
-    """
-    log_message(
-        f"Collecting raw plugin timing data for proposal: {prop}, iteration: {iteration}"
-    )
-
-    # Check if the timing log exists
-    if not os.path.exists(plugin_timing_log):
-        log_message(f"Timing log file {plugin_timing_log} not found")
-        return pd.DataFrame()
-
-    try:
-        # Read the timing log file
-        timing_df = pd.read_csv(plugin_timing_log)
-
-        # If the file is empty or has no data, return empty DataFrame
-        if timing_df.empty:
-            log_message("No plugin timing data found")
-            return pd.DataFrame()
-
-        # Remove any rows with NaN or empty method values
-        timing_df = timing_df.dropna(subset=["method"])
-
-        if timing_df.empty:
-            log_message("No valid plugin timing data after filtering")
-            return pd.DataFrame()
-
-        # Convert timestamp columns to numeric types for consistency
-        numeric_cols = [
-            "create_timestamp",
-            "create_microseconds",
-            "destroy_timestamp",
-            "destroy_microseconds",
-        ]
-        for col in numeric_cols:
-            if col in timing_df.columns:
-                timing_df[col] = pd.to_numeric(timing_df[col], errors="coerce")
-
-        # Add metadata columns to identify this specific test run
-        timing_df["proposal"] = prop
-        timing_df["iteration"] = iteration
-
-        # Add sequence number for operations within this iteration
-        timing_df["operation_sequence"] = range(1, len(timing_df) + 1)
-
-        # Keep all original columns and metadata - no time difference calculations
-        log_message(
-            f"Collected {len(timing_df)} raw timing measurements for {prop} iteration {iteration}"
-        )
-
-        # Log the methods captured for debugging
-        methods_found = timing_df["method"].unique().tolist()
-        log_message(f"Methods captured: {methods_found}")
-
-        return timing_df
-
-    except Exception as e:
-        log_message(f"Error collecting raw plugin timing data: {e}")
-        return pd.DataFrame()
-
-
-def process_plugin_timing_data(plugin_timing_log, prop, log_message):
-    """
-    Process plugin timing data from temporary file for each proposal
-    (Kept for backward compatibility with aggregated stats)
-
-    Args:
-        plugin_timing_log: Path to the plugin timing log file
-        prop: The cryptographic proposal being tested
-        log_message: Function for logging messages
-
-    Returns:
-        A dictionary with timing statistics
-    """
-    log_message(f"Processing plugin timing data for proposal: {prop}")
-
-    # Check if the timing log exists
-    if not os.path.exists(plugin_timing_log):
-        log_message(f"Timing log file {plugin_timing_log} not found")
-        return {
-            "proposal": prop,
-            "algorithms_count": 0,
-            "total_time_ms": 0,
-            "total_time_plugin_ms": 0,
-            "avg_time_ms": 0,
-            "min_time_ms": 0,
-            "max_time_ms": 0,
-        }
-
-    try:
-        # Read the timing log file
-        timing_df = pd.read_csv(plugin_timing_log)
-
-        # If the file is empty or has no data, return default values
-        if timing_df.empty:
-            log_message("No plugin timing data found")
-            return {
-                "proposal": prop,
-                "algorithms_count": 0,
-                "total_time_ms": 0,
-                "total_time_plugin_ms": 0,
-                "avg_time_ms": 0,
-                "min_time_ms": 0,
-                "max_time_ms": 0,
-            }
-
-        # Convert timestamp columns to numeric types
-        numeric_cols = [
-            "create_timestamp",
-            "create_microseconds",
-            "destroy_timestamp",
-            "destroy_microseconds",
-        ]
-        for col in numeric_cols:
-            if col in timing_df.columns:
-                timing_df[col] = pd.to_numeric(timing_df[col], errors="coerce")
-
-        # Calculate time differences in milliseconds
-        timing_df["time_diff_ms"] = (
-            timing_df["destroy_timestamp"] - timing_df["create_timestamp"]
-        ) * 1000 + (
-            timing_df["destroy_microseconds"] - timing_df["create_microseconds"]
-        ) / 1000
-
-        # Remove any rows with NaN or empty method values
-        timing_df = timing_df.dropna(subset=["method"])
-        # Count the number of algorithms (rows)
-        algo_count = len(timing_df)
-
-        # Calculate statistics
-        total_time_ms = timing_df["time_diff_ms"].sum()
-
-        # For total plugin time calculation
-        if algo_count > 0:
-            # Convert both timestamps to milliseconds first
-            create_timestamps_ms = (
-                timing_df["create_timestamp"] * 1000
-                + timing_df["create_microseconds"] / 1000
-            )
-            destroy_timestamps_ms = (
-                timing_df["destroy_timestamp"] * 1000
-                + timing_df["destroy_microseconds"] / 1000
-            )
-
-            # Find the earliest and latest points
-            first_create_ms = create_timestamps_ms.min()
-            last_destroy_ms = destroy_timestamps_ms.max()
-
-            # Calculate the total elapsed time
-            total_time_plugin_ms = last_destroy_ms - first_create_ms
-        else:
-            total_time_plugin_ms = 0
-
-        # Return the statistics
-        return {
-            "proposal": prop,
-            "algorithms_count": algo_count,
-            "total_time_ms": total_time_ms,
-            "total_time_plugin_ms": total_time_plugin_ms,
-        }
-
-    except Exception as e:
-        log_message(f"Error processing plugin timing data: {e}")
-        return {
-            "proposal": prop,
-            "algorithms_count": 0,
-            "total_time_ms": 0,
-            "total_time_plugin_ms": 0,
-            "avg_time_ms": 0,
-            "min_time_ms": 0,
-            "max_time_ms": 0,
-        }
-
-
-def aggregate_plugin_timing(proposal_iterations, prop, num_iterations, log_message):
-    """
-    Aggregate plugin timing data across multiple iterations for a proposal
-
-    Args:
-        proposal_iterations: List of dictionaries with iteration-level timing stats
-        prop: The proposal name
-        num_iterations: Number of iterations run
-        log_message: Logging function
-
-    Returns:
-        Dictionary with aggregated timing statistics for the proposal
-    """
-    log_message(f"Aggregating plugin timing data for proposal: {prop}")
-
-    # Check if algorithm count is consistent across iterations
-    algorithm_counts = [
-        iter_data["algorithms_count"] for iter_data in proposal_iterations
-    ]
-
-    if not algorithm_counts:
-        log_message(f"Warning: No algorithm counts data available for {prop}")
-        total_algorithms = 0
-        is_consistent = True
-    else:
-        # Check if all counts are the same
-        is_consistent = all(count == algorithm_counts[0] for count in algorithm_counts)
-        total_algorithms = (
-            algorithm_counts[0]
-            if is_consistent
-            else max(set(algorithm_counts), key=algorithm_counts.count)
-        )
-    if not is_consistent:
-        log_message(
-            f"Warning: Inconsistent algorithm counts across iterations for {prop}: {algorithm_counts}"
-        )
-
-    # Collect all the timing values
-    all_times_ms = [iter_data["total_time_ms"] for iter_data in proposal_iterations]
-    all_plugin_times_ms = [
-        iter_data["total_time_plugin_ms"] for iter_data in proposal_iterations
-    ]
-
-    # Total time inside plugins
-    total_time_ms = sum(all_times_ms)
-    avg_time_in_plugin_per_iter_ms = (
-        total_time_ms / num_iterations if num_iterations > 0 else 0
-    )
-    # Calculate standard deviation for total_time_ms
-    if len(all_times_ms) > 1:
-        stddev_time_ms = pd.Series(all_times_ms).std()
-    else:
-        stddev_time_ms = 0
-
-    # Total time between first creation and last destruction
-    total_time_plugin_ms = sum(all_plugin_times_ms)
-    avg_elapsed_time_per_iter_ms = (
-        total_time_plugin_ms / num_iterations if num_iterations > 0 else 0
-    )
-    # Calculate standard deviation for total_time_plugin_ms
-    if len(all_plugin_times_ms) > 1:
-        stddev_plugin_ms = pd.Series(all_plugin_times_ms).std()
-    else:
-        stddev_plugin_ms = 0
-
-    # Create and return summary dictionary
-    return {
-        "proposal": prop,
-        "iterations": num_iterations,
-        "total_algorithms": total_algorithms,
-        "total_time_ms": total_time_ms,
-        "total_time_plugin_ms": total_time_plugin_ms,
-        "avg_time_in_plugin_per_iter_ms": avg_time_in_plugin_per_iter_ms,
-        "avg_elapsed_time_per_iter_ms": avg_elapsed_time_per_iter_ms,
-        "stddev_time_ms": stddev_time_ms,
-        "stddev_plugin_ms": stddev_plugin_ms,
-    }
-
-
-def generate_report(
-    output_dir, proposals, df_latencies, df_counters, df_plugin_timing, log_message
-):
-    """Generate the test report"""
-    with open(f"{output_dir}/report.txt", "w") as report_file:
-        report_file.write("StrongSwan QKD Plugin Performance Test Results\n")
-        report_file.write("==============================================\n\n")
-
-        for prop in proposals:
-            if prop in df_latencies and not df_latencies[prop].empty:
-                avg_latency = df_latencies[prop].mean()
-                min_latency = df_latencies[prop].min()
-                max_latency = df_latencies[prop].max()
-                std_latency = (
-                    df_latencies[prop].std() if len(df_latencies[prop]) > 1 else 0
-                )
-            else:
-                avg_latency = min_latency = max_latency = std_latency = "N/A"
-
-            init_count = (
-                df_counters.at[0, f"{prop}_init_requests"]
-                if f"{prop}_init_requests" in df_counters
-                else "N/A"
-            )
-            resp_count = (
-                df_counters.at[0, f"{prop}_resp_responses"]
-                if f"{prop}_resp_responses" in df_counters
-                else "N/A"
-            )
-
-            report_file.write(f"Proposal: {prop}\n")
-            report_file.write(f"IKE_SA_INIT Initiator Requests: {init_count}\n")
-            report_file.write(f"IKE_SA_INIT Responder Responses: {resp_count}\n")
-
-            if isinstance(avg_latency, float):
-                report_file.write(f"Average Latency: {avg_latency:.6f} seconds\n")
-                report_file.write(f"Standard Deviation: {std_latency:.6f} seconds\n")
-                report_file.write(f"Min Latency: {min_latency:.6f} seconds\n")
-                report_file.write(f"Max Latency: {max_latency:.6f} seconds\n")
-            else:
-                report_file.write(f"Average Latency: {avg_latency}\n")
-                report_file.write(f"Standard Deviation: {std_latency}\n")
-                report_file.write(f"Min Latency: {min_latency}\n")
-                report_file.write(f"Max Latency: {max_latency}\n")
-
-            # Add plugin timing data
-            plugin_data = (
-                df_plugin_timing[df_plugin_timing["proposal"] == prop]
-                if not df_plugin_timing.empty
-                else pd.DataFrame()
-            )
-
-            if not plugin_data.empty:
-                row = plugin_data.iloc[0]
-
-                # Check which columns exist before trying to access them
-                available_cols = row.index.tolist()
-
-                if "total_algorithms" in available_cols:
-                    report_file.write(
-                        f"Plugin Operations Count: {row['total_algorithms']}\n"
-                    )
-
-                if "total_time_ms" in available_cols:
-                    report_file.write(
-                        f"Plugin Sum of Times: {row['total_time_ms']:.2f} ms\n"
-                    )
-                    if "stddev_time_ms" in available_cols:
-                        report_file.write(
-                            f"Plugin Sum Std Dev: {row['stddev_time_ms']:.2f} ms\n"
-                        )
-
-                # Add the new metric - total plugin time (first creation to last destruction)
-                if "total_time_plugin_ms" in available_cols:
-                    report_file.write(
-                        f"Plugin Total Time (first to last): {row['total_time_plugin_ms']:.2f} ms\n"
-                    )
-                    if "stddev_plugin_ms" in available_cols:
-                        report_file.write(
-                            f"Plugin Total Time Std Dev: {row['stddev_plugin_ms']:.2f} ms\n"
-                        )
-
-                # Average times with standard deviations
-                if "avg_time_in_plugin_per_iter_ms" in available_cols:
-                    report_file.write(
-                        f"Plugin Avg Time Per Iteration: {row['avg_time_in_plugin_per_iter_ms']:.2f} ms\n"
-                    )
-
-                if "avg_elapsed_time_per_iter_ms" in available_cols:
-                    report_file.write(
-                        f"Plugin Avg Time Per Algorithm: {row['avg_elapsed_time_per_iter_ms']:.2f} ms\n"
-                    )
-
-                # Average time per operation if we have both pieces of data
-                if (
-                    "total_time_ms" in available_cols
-                    and "total_algorithms" in available_cols
-                    and row["total_algorithms"] > 0
-                ):
-                    avg_time_per_op = row["total_time_ms"] / row["total_algorithms"]
-                    report_file.write(
-                        f"Plugin Avg Time Per Operation: {avg_time_per_op:.2f} ms\n"
-                    )
-
-                # Calculate plugin contribution to total IKE latency if both are available
-                if isinstance(avg_latency, float) and "total_time_ms" in available_cols:
-                    avg_latency_ms = avg_latency * 1000  # Convert to ms
-                    plugin_percentage = (
-                        (row["total_time_ms"] / avg_latency_ms) * 100
-                        if avg_latency_ms > 0
-                        else 0
-                    )
-                    report_file.write(
-                        f"Plugin Sum Contribution: {plugin_percentage:.2f}% of IKE latency\n"
-                    )
-
-                # Calculate plugin total time contribution to IKE latency
-                if (
-                    isinstance(avg_latency, float)
-                    and "total_time_plugin_ms" in available_cols
-                ):
-                    avg_latency_ms = avg_latency * 1000  # Convert to ms
-                    plugin_total_percentage = (
-                        (row["total_time_plugin_ms"] / avg_latency_ms) * 100
-                        if avg_latency_ms > 0
-                        else 0
-                    )
-                    report_file.write(
-                        f"Plugin Total Contribution: {plugin_total_percentage:.2f}% of IKE latency\n"
-                    )
-            else:
-                report_file.write("Plugin Timing Data: Not available\n")
-
-            report_file.write("\n")
-
-    log_message(f"Report generated in {output_dir}/report.txt")
 
 
 def main():
@@ -697,12 +253,12 @@ def main():
     log_message(f"Starting test with {NUM_ITERATIONS} iterations per proposal")
 
     # Initialize data structures
-    df_counters = pd.DataFrame()  # For request/response counts
-    df_latencies = pd.DataFrame()  # For latency measurements
+    df_counters = pd.DataFrame()  # For request/response counts (backward compatibility)
     df_plugin_timing = pd.DataFrame()  # For aggregated plugin timing
     df_raw_plugin_timing = (
         pd.DataFrame()
     )  # For raw individual plugin timing measurements
+    df_bytes = pd.DataFrame()  # For pcap measurements (bytes + detailed latencies)
 
     # Establish connection with Bob
     conn, server_socket = establish_connection(HOST, PORT, NUM_ITERATIONS, log_message)
@@ -736,7 +292,7 @@ def main():
                     [df_raw_plugin_timing, raw_timing_data], ignore_index=True
                 )
 
-            # Process plugin timing data for aggregated stats (for backward compatibility)
+            # Process plugin timing data for aggregated stats
             iteration_stats = process_plugin_timing_data(
                 PLUGIN_TIMING_LOG, f"iteration_{i}", log_message
             )
@@ -751,9 +307,63 @@ def main():
         tshark_proc.terminate()
         time.sleep(2)
 
-        # Process captured data
-        latencies, init_request_count, resp_response_count = process_ike_data(
-            ts_res, OUTPUT_DIR, prop, log_message
+        # Process captured data with tshark-based analysis
+        log_message(f"Processing PCAP data for {prop} using tshark...")
+
+        try:
+            # Process the IKE data from the captured PCAP file
+            combined_stats, detailed_latencies = process_ike_data(
+                ts_res, OUTPUT_DIR, prop, log_message
+            )
+
+            # Verify we got valid data
+            if combined_stats.get("total_message_count", 0) == 0:
+                log_message(f"WARNING: No IKE packets found for {prop} - check capture")
+            else:
+                log_message(
+                    f"Successfully processed {combined_stats['total_message_count']} IKE packets for {prop}"
+                )
+
+        except Exception as e:
+            log_message(f"ERROR processing PCAP for {prop}: {e}")
+            # Create empty stats to prevent crashes
+            combined_stats = {
+                "proposal": prop,
+                "total_ike_bytes": 0,
+                "total_message_count": 0,
+                "total_avg_latency": 0,
+            }
+
+            # Add empty stats for all standard exchanges
+            exchanges = [
+                "ike_sa_init",
+                "ike_auth",
+                "ike_intermediate",
+                "informational",
+                "create_child_sa",
+            ]
+            fields = [
+                "count",
+                "bytes",
+                "avg_latency",
+                "min_latency",
+                "max_latency",
+                "std_latency",
+                "latency_count",
+            ]
+
+            for exchange in exchanges:
+                for field in fields:
+                    combined_stats[f"{exchange}_{field}"] = 0
+
+            # Add empty port stats
+            for port in ["500", "4500"]:
+                combined_stats[f"port_{port}_count"] = 0
+                combined_stats[f"port_{port}_bytes"] = 0
+
+        # Store enhanced data (bytes + detailed latencies)
+        df_bytes = pd.concat(
+            [df_bytes, pd.DataFrame([combined_stats])], ignore_index=True
         )
 
         # Aggregate timing data from all iterations for this proposal
@@ -766,33 +376,27 @@ def main():
             [df_plugin_timing, pd.DataFrame([proposal_summary])], ignore_index=True
         )
 
-        # Store data
-        df_counters.at[0, f"{prop}_init_requests"] = init_request_count
-        df_counters.at[0, f"{prop}_resp_responses"] = resp_response_count
-        df_latencies[prop] = pd.Series(latencies)
-
         log_message(f"Completed testing with proposal: {prop}\n\n")
 
     # Save DataFrames
-    counters_file = f"{OUTPUT_DIR}/counters.csv"
-    latencies_file = f"{OUTPUT_DIR}/latencies.csv"
     plugin_timing_file = f"{OUTPUT_DIR}/plugin_timing_summary.csv"
     raw_plugin_timing_file = f"{OUTPUT_DIR}/plugin_timing_raw.csv"
+    pcap_measurements_file = f"{OUTPUT_DIR}/pcap_measurements.csv"
 
-    df_counters.to_csv(counters_file, index=False)
-    df_latencies.to_csv(latencies_file, index=False)
     df_plugin_timing.to_csv(plugin_timing_file, index=False)
     df_raw_plugin_timing.to_csv(raw_plugin_timing_file, index=False)
+    df_bytes.to_csv(pcap_measurements_file, index=False)
 
-    log_message(f"Counter data stored in '{counters_file}'")
-    log_message(f"Latency data stored in '{latencies_file}'")
     log_message(f"Plugin timing data stored in '{plugin_timing_file}'")
     log_message(f"Raw plugin timing data stored in '{raw_plugin_timing_file}'")
-
-    # Generate report
-    generate_report(
-        OUTPUT_DIR, proposals, df_latencies, df_counters, df_plugin_timing, log_message
+    log_message(
+        f"PCAP measurements (bytes + detailed latencies) stored in '{pcap_measurements_file}'"
     )
+
+    # Generate enhanced reports
+    generate_plugin_report(OUTPUT_DIR, proposals, df_plugin_timing, log_message)
+
+    generate_pcap_report(OUTPUT_DIR, proposals, df_plugin_timing, df_bytes, log_message)
 
     # Cleanup
     log_message("Test completed. Closing connections...")

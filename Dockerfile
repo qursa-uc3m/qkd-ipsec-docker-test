@@ -51,7 +51,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     libcurl4-openssl-dev \
     libjansson-dev \
+    software-properties-common \
     && rm -rf /var/lib/apt/lists/*
+
+# Install latest Wireshark with IKE_INTERMEDIATE support
+RUN add-apt-repository ppa:wireshark-dev/stable -y && \
+    apt-get update && \
+    apt-get install -y wireshark tshark && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY config/openssl.cnf /etc/ssl/qkd-kem-openssl.cnf
 
@@ -90,7 +97,6 @@ fi
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
-    tshark \
     && rm -rf /var/lib/apt/lists/*
 
 # Install required Python packages
