@@ -4,6 +4,7 @@ proposals:
   - aes128-sha256-ecp256    # Traditional elliptic curve
   - aes128-sha256-x25519    # Modern elliptic curve
   - aes128-sha256-kyber1    # Post-quantum KEM
+  - aes128-sha256-x25519-ke1_kyber1  # Hybrid traditional + PQ
   - aes128-sha256-qkd       # Pure QKD
   - aes128-sha256-qkd_kyber1  # Hybrid QKD+PQC with qkd-kem provider
   - aes128-sha256-qkd-ke1_kyber1  # Sequential hybrid via IKE INTERMEDIATE (RFC 9370)
@@ -14,6 +15,7 @@ esp_proposals:
   - aes128-sha256-ecp256
   - aes128-sha256-x25519
   - aes128-sha256-kyber1
+  - aes128-sha256-x25519-ke1_kyber1
   - aes128-sha256-qkd
   - aes128-sha256-qkd_kyber1
   - aes128-sha256-qkd-ke1_kyber1
