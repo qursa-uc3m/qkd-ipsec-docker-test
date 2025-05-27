@@ -5,6 +5,7 @@
 
 import subprocess
 import pandas as pd
+import numpy as np
 import os
 from collections import defaultdict
 
@@ -160,26 +161,26 @@ def get_total_pcap_bytes(pcap_file, log_message):
         return 0
 
 
-def calculate_latencies_and_save(packets, filename, log_message):
-    """Calculate latencies and save detailed CSV"""
+def calculate_ike_handshake_latencies(packets, filename, log_message, iters=1):
+    """Calculate IKE handshake latency per iteration by summing all exchange latencies"""
     if not packets:
         log_message("No packets for latency calculation")
-        return {}
+        return []
 
     # Convert packets to DataFrame for efficient processing
     df_packets = pd.DataFrame(packets)
+    df_packets = df_packets.sort_values("timestamp").reset_index(drop=True)
 
-    # Group by exchange type and message_id
+    # Calculate individual exchange latencies
     latency_data = []
-    latency_results = {}
 
+    # Group by exchange type and message_id to find request-response pairs
     for (exchange_type, message_id), group in df_packets.groupby(
         ["exchange_type", "message_id"]
     ):
         if len(group) < 2:
             continue
 
-        # Sort by timestamp
         group = group.sort_values("timestamp")
 
         # Calculate latencies for request-response pairs
@@ -202,56 +203,65 @@ def calculate_latencies_and_save(packets, filename, log_message):
                     }
                 )
 
-    # Convert latency data to DataFrame and calculate statistics
-    if latency_data:
-        df_latencies = pd.DataFrame(latency_data)
+    if not latency_data:
+        log_message("No latency pairs found")
+        return []
 
-        # Calculate statistics per exchange type using pandas groupby
-        stats = (
-            df_latencies.groupby("exchange_type")["latency_seconds"]
-            .agg(["mean", "std", "min", "max", "count"])
-            .reset_index()
-        )
+    # Convert to DataFrame
+    df_latencies = pd.DataFrame(latency_data)
 
-        # Convert to dictionary format for backwards compatibility
-        for _, row in stats.iterrows():
-            exchange_type = row["exchange_type"]
-            latency_results[exchange_type] = {
-                "latencies": df_latencies[
-                    df_latencies["exchange_type"] == exchange_type
-                ]["latency_seconds"].tolist(),
-                "latency_avg": row["mean"],
-                "latency_min": row["min"],
-                "latency_max": row["max"],
-                "latency_std": row["std"] if pd.notna(row["std"]) else 0,
-                "count": int(row["count"]),
-            }
+    # Calculate total IKE handshake latency per iteration
+    if iters > 1:
+        # Sort by request timestamp and group into iterations
+        df_latencies_sorted = df_latencies.sort_values("request_timestamp")
+        latencies_per_iter = len(df_latencies) // iters
 
-        # Save CSV file
-        df_latencies.to_csv(filename, index=False)
-        log_message(f"Saved {len(df_latencies)} latency measurements to {filename}")
+        ike_handshake_latencies = []
 
-        # Log summary using pandas groupby
-        summary = (
-            df_latencies.groupby("exchange_type")["latency_ms"]
-            .agg(["count", "mean"])
-            .reset_index()
-        )
-        for _, row in summary.iterrows():
+        for iter_num in range(iters):
+            start_idx = iter_num * latencies_per_iter
+            end_idx = (iter_num + 1) * latencies_per_iter
+
+            # Sum all latencies for this iteration
+            iter_latencies = df_latencies_sorted.iloc[start_idx:end_idx]
+            total_ike_latency = iter_latencies["latency_seconds"].sum()
+            ike_handshake_latencies.append(total_ike_latency)
+
             log_message(
-                f"  {row['exchange_type']}: {int(row['count'])} pairs, avg {row['mean']:.2f}ms"
+                f"Iteration {iter_num + 1}: IKE handshake latency = {total_ike_latency:.6f}s ({total_ike_latency*1000:.2f}ms)"
             )
     else:
-        log_message("No latency pairs created")
+        # Single iteration - sum all latencies
+        ike_handshake_latencies = [df_latencies["latency_seconds"].sum()]
+        log_message(
+            f"Single iteration: IKE handshake latency = {ike_handshake_latencies[0]:.6f}s ({ike_handshake_latencies[0]*1000:.2f}ms)"
+        )
 
-    return latency_results
+    # Save detailed CSV file
+    df_latencies.to_csv(filename, index=False)
+    log_message(
+        f"Saved {len(df_latencies)} individual latency measurements to {filename}"
+    )
+
+    # Log summary by exchange type
+    summary = (
+        df_latencies.groupby("exchange_type")["latency_ms"]
+        .agg(["count", "mean"])
+        .reset_index()
+    )
+    for _, row in summary.iterrows():
+        log_message(
+            f"  {row['exchange_type']}: {int(row['count'])} pairs, avg {row['mean']:.2f}ms"
+        )
+
+    return ike_handshake_latencies
 
 
 def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
-    """Analysis with single latency calculation"""
+    """Analyze packet counts and bytes"""
     if not packets:
         log_message("No packets to analyze")
-        return create_empty_combined_stats(prop), {}
+        return create_empty_combined_stats(prop)
 
     # Count packets by exchange type
     exchange_counts = defaultdict(int)
@@ -265,12 +275,12 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
         exchange_bytes[exchange_type] += frame_length
         total_ike_bytes += frame_length
 
-    # Normalize by iterations (floor division for integers)
+    # Normalize by iterations
     total_ike_bytes = total_ike_bytes // iters
     total_pcap_bytes = total_pcap_bytes // iters
     total_message_count = len(packets) // iters
 
-    # Log what we found (normalized values)
+    # Log analysis results
     log_message(
         f"Analysis complete: {total_message_count} IKE packets per iteration, {total_ike_bytes:,} IKE bytes per iteration"
     )
@@ -286,10 +296,7 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
             f"Non-IKE traffic per iteration: {non_ike_bytes:,} bytes ({100-ike_percentage:.1f}%)"
         )
 
-    # Calculate total stats from exchange latencies
-    total_latency_avg = total_latency_std = 0
-
-    # Create combined stats with normalized PCAP bytes
+    # Create combined stats
     combined_stats = {
         "proposal": prop,
         "total_ike_bytes": total_ike_bytes,
@@ -301,8 +308,8 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
             (total_ike_bytes / total_pcap_bytes * 100) if total_pcap_bytes > 0 else 0
         ),
         "total_message_count": total_message_count,
-        "total_latency_avg": total_latency_avg,
-        "total_latency_std": total_latency_std,
+        "ike_latency_avg": 0,  # Will be updated with IKE handshake latency
+        "ike_latency_std": 0,  # Will be updated with IKE handshake latency
     }
 
     # Add exchange stats (normalized)
@@ -320,50 +327,20 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
             {
                 f"{exchange}_count": count,
                 f"{exchange}_bytes": bytes_val,
-                f"{exchange}_latency_avg": 0,
-                f"{exchange}_latency_min": 0,
-                f"{exchange}_latency_max": 0,
-                f"{exchange}_latency_std": 0,
-                f"{exchange}_latency_count": 0,
             }
         )
 
     return combined_stats
 
 
-def update_stats_with_latencies(combined_stats, latency_results):
-    """Update combined stats with calculated latencies"""
-    if latency_results:
-        # Use pandas Series for efficient statistics calculation
-        valid_latencies = pd.Series(
-            [
-                data["latency_avg"]
-                for data in latency_results.values()
-                if data["latency_avg"] > 0
-            ]
+def update_stats_with_ike_latencies(combined_stats, ike_handshake_latencies):
+    """Update combined stats with IKE handshake latencies"""
+    if ike_handshake_latencies:
+        latencies_array = np.array(ike_handshake_latencies)
+        combined_stats["ike_latency_avg"] = np.mean(latencies_array)
+        combined_stats["ike_latency_std"] = (
+            np.std(latencies_array, ddof=1) if len(latencies_array) > 1 else 0
         )
-
-        if not valid_latencies.empty:
-            combined_stats["total_latency_avg"] = valid_latencies.mean()
-            combined_stats["total_latency_std"] = (
-                valid_latencies.std() if len(valid_latencies) > 1 else 0
-            )
-
-    # Update individual exchange stats
-    for exchange_type, latency_data in latency_results.items():
-        combined_stats[f"{exchange_type}_latency_avg"] = latency_data.get(
-            "latency_avg", 0
-        )
-        combined_stats[f"{exchange_type}_latency_min"] = latency_data.get(
-            "latency_min", 0
-        )
-        combined_stats[f"{exchange_type}_latency_max"] = latency_data.get(
-            "latency_max", 0
-        )
-        combined_stats[f"{exchange_type}_latency_std"] = latency_data.get(
-            "latency_std", 0
-        )
-        combined_stats[f"{exchange_type}_latency_count"] = latency_data.get("count", 0)
 
 
 def create_empty_combined_stats(prop):
@@ -375,8 +352,8 @@ def create_empty_combined_stats(prop):
         "non_ike_bytes": 0,
         "ike_percentage": 0,
         "total_message_count": 0,
-        "total_latency_avg": 0,
-        "total_latency_std": 0,
+        "ike_latency_avg": 0,
+        "ike_latency_std": 0,
     }
 
     exchanges = [
@@ -391,11 +368,6 @@ def create_empty_combined_stats(prop):
             {
                 f"{exchange}_count": 0,
                 f"{exchange}_bytes": 0,
-                f"{exchange}_latency_avg": 0,
-                f"{exchange}_latency_min": 0,
-                f"{exchange}_latency_max": 0,
-                f"{exchange}_latency_std": 0,
-                f"{exchange}_latency_count": 0,
             }
         )
 
@@ -403,8 +375,8 @@ def create_empty_combined_stats(prop):
 
 
 def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
-    """main processing function"""
-    log_message(f"Processing PCAP for proposal: {prop}")
+    """Main processing function"""
+    log_message(f"Processing PCAP for proposal: {prop} with {iters} iterations")
 
     # Get total PCAP bytes first
     total_pcap_bytes = get_total_pcap_bytes(pcap_file, log_message)
@@ -412,30 +384,30 @@ def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
     # Extract IKE packets
     packets = extract_ike_packets(pcap_file, log_message)
 
-    # Analyze packets (basic stats only) with total PCAP bytes
+    # Analyze packets for counts and bytes
     combined_stats = analyze_packets(
         packets, prop, log_message, total_pcap_bytes, iters
     )
 
-    # Calculate latencies and save CSV in one operation
-    latency_results = calculate_latencies_and_save(
-        packets, f"{output_dir}/detailed_latencies_{prop}.csv", log_message
+    # Calculate IKE handshake latencies per iteration
+    ike_handshake_latencies = calculate_ike_handshake_latencies(
+        packets, f"{output_dir}/detailed_latencies_{prop}.csv", log_message, iters
     )
 
     # Update combined stats with latency data
-    update_stats_with_latencies(combined_stats, latency_results)
+    update_stats_with_ike_latencies(combined_stats, ike_handshake_latencies)
 
-    # Log results
-    total_latency_ms = combined_stats.get("total_latency_avg", 0) * 1000
-    total_latency_std_ms = combined_stats.get("total_latency_std", 0) * 1000
+    # Log final results
+    ike_latency_ms = combined_stats.get("ike_latency_avg", 0) * 1000
+    ike_latency_std_ms = combined_stats.get("ike_latency_std", 0) * 1000
     log_message(
-        f"Results for {prop}: {combined_stats['total_message_count']} IKE packets, "
-        f"{combined_stats['total_ike_bytes']:,} IKE bytes, "
-        f"{combined_stats['total_pcap_bytes']:,} total bytes, "
-        f"{total_latency_ms:.2f}±{total_latency_std_ms:.2f}ms avg latency"
+        f"Results for {prop}: {combined_stats['total_message_count']} IKE packets per iteration, "
+        f"{combined_stats['total_ike_bytes']:,} IKE bytes per iteration, "
+        f"{combined_stats['total_pcap_bytes']:,} total bytes per iteration, "
+        f"IKE handshake latency: {ike_latency_ms:.2f}±{ike_latency_std_ms:.2f}ms"
     )
 
-    return combined_stats, latency_results
+    return combined_stats, {}  # No exchange-level latencies returned
 
 
 def generate_pcap_report(
@@ -462,20 +434,20 @@ def generate_pcap_report(
             total_pcap_bytes = row.get("total_pcap_bytes", 0)
             non_ike_bytes = row.get("non_ike_bytes", 0)
             ike_percentage = row.get("ike_percentage", 0)
-            total_latency_avg = row.get("total_latency_avg", 0)
-            total_latency_std = row.get("total_latency_std", 0)
+            ike_latency_avg = row.get("ike_latency_avg", 0)
+            ike_latency_std = row.get("ike_latency_std", 0)
 
-            f.write(f"Total IKE Packets: {total_packets}\n")
-            f.write(f"Total IKE Bytes: {total_ike_bytes:,}\n")
-            f.write(f"Total PCAP Bytes: {total_pcap_bytes:,}\n")
-            f.write(f"Non-IKE Bytes: {non_ike_bytes:,}\n")
+            f.write(f"Total IKE Packets (per iteration): {total_packets}\n")
+            f.write(f"Total IKE Bytes (per iteration): {total_ike_bytes:,}\n")
+            f.write(f"Total PCAP Bytes (per iteration): {total_pcap_bytes:,}\n")
+            f.write(f"Non-IKE Bytes (per iteration): {non_ike_bytes:,}\n")
             f.write(f"IKE Percentage: {ike_percentage:.1f}%\n")
             f.write(
-                f"Total Average Latency: {total_latency_avg:.6f} ± {total_latency_std:.6f} seconds "
-                f"({total_latency_avg*1000:.2f} ± {total_latency_std*1000:.2f} ms)\n\n"
+                f"IKE Handshake Latency: {ike_latency_avg:.6f} ± {ike_latency_std:.6f} seconds "
+                f"({ike_latency_avg*1000:.2f} ± {ike_latency_std*1000:.2f} ms)\n\n"
             )
 
-            # Exchange breakdown
+            # Exchange breakdown (counts and bytes only)
             f.write("Exchange Type Breakdown:\n")
             exchanges = [
                 ("ike_sa_init", "IKE_SA_INIT"),
@@ -489,16 +461,7 @@ def generate_pcap_report(
                 count = row.get(f"{exchange}_count", 0)
                 if count > 0:
                     bytes_val = row.get(f"{exchange}_bytes", 0)
-                    latency_avg = row.get(f"{exchange}_latency_avg", 0)
-                    latency_std = row.get(f"{exchange}_latency_std", 0)
-                    latency_count = row.get(f"{exchange}_latency_count", 0)
-
-                    f.write(f"  {display_name}: {count} packets, {bytes_val:,} bytes")
-                    if latency_count > 0:
-                        f.write(
-                            f", {latency_count} req/resp pairs, avg {latency_avg*1000:.2f}±{latency_std*1000:.2f}ms"
-                        )
-                    f.write("\n")
+                    f.write(f"  {display_name}: {count} packets, {bytes_val:,} bytes\n")
 
             # Plugin timing
             plugin_data = (
@@ -542,23 +505,23 @@ def generate_pcap_report(
                     "total_ike_bytes": "sum",
                     "total_pcap_bytes": "sum",
                     "total_message_count": "sum",
-                    "total_latency_avg": "mean",
-                    "total_latency_std": "mean",
+                    "ike_latency_avg": "mean",
+                    "ike_latency_std": "mean",
                 }
             )
 
             f.write(
-                f"Total IKE bytes processed: {summary_stats['total_ike_bytes']:,}\n"
+                f"Total IKE bytes processed (per iteration): {summary_stats['total_ike_bytes']:,}\n"
             )
             f.write(
-                f"Total PCAP bytes processed: {summary_stats['total_pcap_bytes']:,}\n"
+                f"Total PCAP bytes processed (per iteration): {summary_stats['total_pcap_bytes']:,}\n"
             )
             f.write(
-                f"Total messages processed: {summary_stats['total_message_count']:,}\n"
+                f"Total messages processed (per iteration): {summary_stats['total_message_count']:,}\n"
             )
             f.write(
-                f"Average handshake latency across all proposals: "
-                f"{summary_stats['total_latency_avg']*1000:.2f} ± {summary_stats['total_latency_std']*1000:.2f} ms\n"
+                f"Average IKE handshake latency across all proposals: "
+                f"{summary_stats['ike_latency_avg']*1000:.2f} ± {summary_stats['ike_latency_std']*1000:.2f} ms\n"
             )
 
     # Save aggregated measurements
