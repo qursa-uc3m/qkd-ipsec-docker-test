@@ -892,7 +892,7 @@ class QKDTestOrchestrator:
         print(f"Tests completed. Results accessible in {self.dirs['output_dir']}/")
 
     def analyze_results(self):
-        """Analyze the test results."""
+        """Analyze the test results using the updated analysis script."""
         if not self.config["test"]["analyze_results"]:
             print("Analysis disabled. Skipping...")
             return
@@ -902,24 +902,61 @@ class QKDTestOrchestrator:
         # Create analysis directory
         Path(self.dirs["analysis_dir"]).mkdir(parents=True, exist_ok=True)
 
-        # Set log scale argument if enabled
-        log_scale_arg = (
-            "--log-scale" if self.config.get("test", {}).get("log_scale", False) else ""
-        )
+        # Prepare file paths
+        plugin_timing_file = f"{self.dirs['output_dir']}/plugin_timing_raw.csv"
+        pcap_bytes_file = f"{self.dirs['output_dir']}/pcap_measurements.csv"
 
-        # Run analysis script
-        analysis_cmd = [
-            "python3",
-            "analyze_results.py",
-            f"{self.dirs['output_dir']}/plugin_timing_raw.csv",
-            self.dirs["analysis_dir"],
-        ]
+        # Check which files exist
+        has_plugin_timing = os.path.exists(plugin_timing_file)
+        has_pcap_bytes = os.path.exists(pcap_bytes_file)
 
-        if log_scale_arg:
-            analysis_cmd.append(log_scale_arg)
+        if not has_plugin_timing and not has_pcap_bytes:
+            print(
+                "Warning: No analysis files found (plugin_timing_raw.csv or pcap_measurements.csv)"
+            )
+            return
 
-        self._run_docker_command(analysis_cmd)
-        print(f"Analysis completed! Results available in {self.dirs['analysis_dir']}")
+        # Build analysis command
+        analysis_cmd = ["python3", "analyze_results.py"]  # Updated script name
+
+        # Add plugin timing analysis if file exists
+        if has_plugin_timing:
+            analysis_cmd.extend(["--plugin-timing", plugin_timing_file])
+            print(f"  - Plugin timing analysis: {plugin_timing_file}")
+
+        # Add PCAP bytes analysis if file exists
+        if has_pcap_bytes:
+            analysis_cmd.extend(["--pcap-bytes", pcap_bytes_file])
+            print(f"  - PCAP bytes analysis: {pcap_bytes_file}")
+
+        # Add output directory
+        analysis_cmd.extend(["--output", self.dirs["analysis_dir"]])
+
+        # Add log scale if enabled
+        if self.config.get("test", {}).get("log_scale", False):
+            analysis_cmd.append("--log-scale")
+            print("  - Using logarithmic scale for plots")
+
+        try:
+            print(f"Running analysis command: {' '.join(analysis_cmd)}")
+            self._run_docker_command(analysis_cmd)
+            print(
+                f"✓ Analysis completed! Results available in {self.dirs['analysis_dir']}"
+            )
+
+            # List generated files
+            if os.path.exists(self.dirs["analysis_dir"]):
+                analysis_files = os.listdir(self.dirs["analysis_dir"])
+                if analysis_files:
+                    print("Generated analysis files:")
+                    for file in sorted(analysis_files):
+                        print(f"  - {file}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Analysis failed: {e}")
+            print("Check that analyze_results.py is in the current directory")
+        except Exception as e:
+            print(f"✗ Analysis error: {e}")
 
     def _prompt_container_shutdown(self):
         """Ask user if they want to stop containers."""

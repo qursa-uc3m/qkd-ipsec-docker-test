@@ -313,7 +313,7 @@ def main():
         try:
             # Process the IKE data from the captured PCAP file
             combined_stats, detailed_latencies = process_ike_data(
-                ts_res, OUTPUT_DIR, prop, log_message
+                ts_res, OUTPUT_DIR, prop, log_message, NUM_ITERATIONS
             )
 
             # Verify we got valid data

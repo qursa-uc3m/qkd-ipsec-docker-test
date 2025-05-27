@@ -194,7 +194,11 @@ if [ "$ANALYZE_RESULTS" = true ]; then
   ANALYSIS_DIR="./analysis/${RELATIVE_DIR}"
   mkdir -p "${ANALYSIS_DIR}"
   
-  python3 analyze_results.py "${OUTPUT_DIR}/plugin_timing_raw.csv" "${ANALYSIS_DIR}"
+  python3 analyze_plugin_timing.py \
+    --plugin-timing "${OUTPUT_DIR}/plugin_timing_raw.csv" \
+    --pcap-bytes "${OUTPUT_DIR}/pcap_measurements.csv" \
+    --output "${ANALYSIS_DIR}"
+  
   echo "Analysis completed! Results available in ${ANALYSIS_DIR}"
 fi
 

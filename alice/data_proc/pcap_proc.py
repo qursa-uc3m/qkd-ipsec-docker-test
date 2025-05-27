@@ -105,93 +105,141 @@ def extract_ike_packets(pcap_file, log_message):
         return []
 
 
+def get_total_pcap_bytes(pcap_file, log_message):
+    """Get total bytes in PCAP file (all traffic)"""
+    if not os.path.exists(pcap_file):
+        log_message(f"Error: PCAP file not found: {pcap_file}")
+        return 0
+
+    log_message(f"Getting total PCAP bytes from {pcap_file}...")
+
+    cmd = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-T",
+        "fields",
+        "-e",
+        "frame.len",
+        "-E",
+        "separator=,",
+        "-E",
+        "occurrence=f",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            log_message(f"tshark error: {result.stderr}")
+            return 0
+
+        lines = result.stdout.strip().split("\n")
+        if not lines or lines == [""]:
+            log_message("No packets found in PCAP")
+            return 0
+
+        total_bytes = 0
+        packet_count = 0
+
+        for line in lines:
+            if line.strip():
+                try:
+                    frame_length = int(line.strip()) if line.strip() else 0
+                    total_bytes += frame_length
+                    packet_count += 1
+                except ValueError:
+                    continue
+
+        log_message(
+            f"Total PCAP contains {packet_count} packets, {total_bytes:,} bytes"
+        )
+        return total_bytes
+
+    except Exception as e:
+        log_message(f"Error getting total PCAP bytes: {e}")
+        return 0
+
+
 def calculate_latencies_and_save(packets, filename, log_message):
     """Calculate latencies and save detailed CSV"""
     if not packets:
         log_message("No packets for latency calculation")
         return {}
 
-    # Group packets by exchange type and message_id (SINGLE grouping operation)
-    exchange_groups = defaultdict(list)
-    for packet in packets:
-        key = (packet["exchange_type"], packet["message_id"])
-        exchange_groups[key].append(packet)
+    # Convert packets to DataFrame for efficient processing
+    df_packets = pd.DataFrame(packets)
 
+    # Group by exchange type and message_id
+    latency_data = []
     latency_results = {}
-    latency_data = []  # For CSV output
 
-    for (exchange_type, message_id), group_packets in exchange_groups.items():
-        if len(group_packets) < 2:
+    for (exchange_type, message_id), group in df_packets.groupby(
+        ["exchange_type", "message_id"]
+    ):
+        if len(group) < 2:
             continue
 
         # Sort by timestamp
-        group_packets.sort(key=lambda x: x["timestamp"])
+        group = group.sort_values("timestamp")
 
-        # Calculate latencies for pairs (SINGLE pairing operation)
-        latencies = []
-        for i in range(0, len(group_packets) - 1, 2):
-            if i + 1 < len(group_packets):
-                req_time = group_packets[i]["timestamp"]
-                resp_time = group_packets[i + 1]["timestamp"]
-                latency = resp_time - req_time
-                latencies.append(latency)
+        # Calculate latencies for request-response pairs
+        for i in range(0, len(group) - 1, 2):
+            if i + 1 < len(group):
+                req_row = group.iloc[i]
+                resp_row = group.iloc[i + 1]
 
-                # Add to CSV data while we're here
+                latency = resp_row["timestamp"] - req_row["timestamp"]
+
                 latency_data.append(
                     {
                         "exchange_type": exchange_type,
                         "pair_number": (i // 2) + 1,
                         "latency_seconds": latency,
                         "latency_ms": latency * 1000,
-                        "request_timestamp": req_time,
-                        "response_timestamp": resp_time,
+                        "request_timestamp": req_row["timestamp"],
+                        "response_timestamp": resp_row["timestamp"],
                         "message_id": message_id,
                     }
                 )
 
-        # Calculate statistics
-        if latencies:
-            if exchange_type not in latency_results:
-                latency_results[exchange_type] = {
-                    "latencies": [],
-                    "latency_avg": 0,
-                    "latency_min": 0,
-                    "latency_max": 0,
-                    "latency_std": 0,
-                    "count": 0,
-                }
+    # Convert latency data to DataFrame and calculate statistics
+    if latency_data:
+        df_latencies = pd.DataFrame(latency_data)
 
-            existing_latencies = latency_results[exchange_type]["latencies"]
-            all_latencies = existing_latencies + latencies
-            avg = sum(all_latencies) / len(all_latencies)
-            std = (
-                (sum((x - avg) ** 2 for x in all_latencies) / len(all_latencies)) ** 0.5
-                if len(all_latencies) > 1
-                else 0
-            )
+        # Calculate statistics per exchange type using pandas groupby
+        stats = (
+            df_latencies.groupby("exchange_type")["latency_seconds"]
+            .agg(["mean", "std", "min", "max", "count"])
+            .reset_index()
+        )
 
+        # Convert to dictionary format for backwards compatibility
+        for _, row in stats.iterrows():
+            exchange_type = row["exchange_type"]
             latency_results[exchange_type] = {
-                "latencies": all_latencies,
-                "latency_avg": avg,
-                "latency_min": min(all_latencies),
-                "latency_max": max(all_latencies),
-                "latency_std": std,
-                "count": len(all_latencies),
+                "latencies": df_latencies[
+                    df_latencies["exchange_type"] == exchange_type
+                ]["latency_seconds"].tolist(),
+                "latency_avg": row["mean"],
+                "latency_min": row["min"],
+                "latency_max": row["max"],
+                "latency_std": row["std"] if pd.notna(row["std"]) else 0,
+                "count": int(row["count"]),
             }
 
-    # Save CSV file
-    if latency_data:
-        pd.DataFrame(latency_data).to_csv(filename, index=False)
-        log_message(f"Saved {len(latency_data)} latency measurements to {filename}")
+        # Save CSV file
+        df_latencies.to_csv(filename, index=False)
+        log_message(f"Saved {len(df_latencies)} latency measurements to {filename}")
 
-        # Log summary
-        for exchange_type in set(d["exchange_type"] for d in latency_data):
-            exchange_data = [
-                d for d in latency_data if d["exchange_type"] == exchange_type
-            ]
-            avg_ms = sum(d["latency_ms"] for d in exchange_data) / len(exchange_data)
+        # Log summary using pandas groupby
+        summary = (
+            df_latencies.groupby("exchange_type")["latency_ms"]
+            .agg(["count", "mean"])
+            .reset_index()
+        )
+        for _, row in summary.iterrows():
             log_message(
-                f"  {exchange_type}: {len(exchange_data)} pairs, avg {avg_ms:.2f}ms"
+                f"  {row['exchange_type']}: {int(row['count'])} pairs, avg {row['mean']:.2f}ms"
             )
     else:
         log_message("No latency pairs created")
@@ -199,8 +247,8 @@ def calculate_latencies_and_save(packets, filename, log_message):
     return latency_results
 
 
-def analyze_packets(packets, prop, log_message):
-    """Simplified analysis with single latency calculation"""
+def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
+    """Analysis with single latency calculation"""
     if not packets:
         log_message("No packets to analyze")
         return create_empty_combined_stats(prop), {}
@@ -208,35 +256,56 @@ def analyze_packets(packets, prop, log_message):
     # Count packets by exchange type
     exchange_counts = defaultdict(int)
     exchange_bytes = defaultdict(int)
-    total_bytes = 0
+    total_ike_bytes = 0
 
     for packet in packets:
         exchange_type = packet["exchange_type"]
         frame_length = packet["frame_length"]
         exchange_counts[exchange_type] += 1
         exchange_bytes[exchange_type] += frame_length
-        total_bytes += frame_length
+        total_ike_bytes += frame_length
 
-    # Log what we found
-    log_message(f"Analysis complete: {len(packets)} packets, {total_bytes} bytes")
-    for exchange_type, count in exchange_counts.items():
+    # Normalize by iterations (floor division for integers)
+    total_ike_bytes = total_ike_bytes // iters
+    total_pcap_bytes = total_pcap_bytes // iters
+    total_message_count = len(packets) // iters
+
+    # Log what we found (normalized values)
+    log_message(
+        f"Analysis complete: {total_message_count} IKE packets per iteration, {total_ike_bytes:,} IKE bytes per iteration"
+    )
+    if total_pcap_bytes > 0:
+        non_ike_bytes = total_pcap_bytes - total_ike_bytes
+        ike_percentage = (total_ike_bytes / total_pcap_bytes) * 100
+
+        log_message(f"Total PCAP per iteration: {total_pcap_bytes:,} bytes")
         log_message(
-            f"  {exchange_type}: {count} packets, {exchange_bytes[exchange_type]} bytes"
+            f"IKE traffic per iteration: {total_ike_bytes:,} bytes ({ike_percentage:.1f}%)"
+        )
+        log_message(
+            f"Non-IKE traffic per iteration: {non_ike_bytes:,} bytes ({100-ike_percentage:.1f}%)"
         )
 
     # Calculate total stats from exchange latencies
     total_latency_avg = total_latency_std = 0
 
-    # Create combined stats
+    # Create combined stats with normalized PCAP bytes
     combined_stats = {
         "proposal": prop,
-        "total_ike_bytes": total_bytes,
-        "total_message_count": len(packets),
+        "total_ike_bytes": total_ike_bytes,
+        "total_pcap_bytes": total_pcap_bytes,
+        "non_ike_bytes": (
+            total_pcap_bytes - total_ike_bytes if total_pcap_bytes > 0 else 0
+        ),
+        "ike_percentage": (
+            (total_ike_bytes / total_pcap_bytes * 100) if total_pcap_bytes > 0 else 0
+        ),
+        "total_message_count": total_message_count,
         "total_latency_avg": total_latency_avg,
         "total_latency_std": total_latency_std,
     }
 
-    # Add exchange stats
+    # Add exchange stats (normalized)
     exchanges = [
         "ike_sa_init",
         "ike_auth",
@@ -245,8 +314,8 @@ def analyze_packets(packets, prop, log_message):
         "create_child_sa",
     ]
     for exchange in exchanges:
-        count = exchange_counts.get(exchange, 0)
-        bytes_val = exchange_bytes.get(exchange, 0)
+        count = exchange_counts.get(exchange, 0) // iters
+        bytes_val = exchange_bytes.get(exchange, 0) // iters
         combined_stats.update(
             {
                 f"{exchange}_count": count,
@@ -265,24 +334,20 @@ def analyze_packets(packets, prop, log_message):
 def update_stats_with_latencies(combined_stats, latency_results):
     """Update combined stats with calculated latencies"""
     if latency_results:
-        valid_latencies = [
-            data["latency_avg"]
-            for data in latency_results.values()
-            if data["latency_avg"] > 0
-        ]
-        if valid_latencies:
-            total_avg = sum(valid_latencies) / len(valid_latencies)
-            total_std = (
-                (
-                    sum((x - total_avg) ** 2 for x in valid_latencies)
-                    / len(valid_latencies)
-                )
-                ** 0.5
-                if len(valid_latencies) > 1
-                else 0
+        # Use pandas Series for efficient statistics calculation
+        valid_latencies = pd.Series(
+            [
+                data["latency_avg"]
+                for data in latency_results.values()
+                if data["latency_avg"] > 0
+            ]
+        )
+
+        if not valid_latencies.empty:
+            combined_stats["total_latency_avg"] = valid_latencies.mean()
+            combined_stats["total_latency_std"] = (
+                valid_latencies.std() if len(valid_latencies) > 1 else 0
             )
-            combined_stats["total_latency_avg"] = total_avg
-            combined_stats["total_latency_std"] = total_std
 
     # Update individual exchange stats
     for exchange_type, latency_data in latency_results.items():
@@ -306,6 +371,9 @@ def create_empty_combined_stats(prop):
     combined_stats = {
         "proposal": prop,
         "total_ike_bytes": 0,
+        "total_pcap_bytes": 0,
+        "non_ike_bytes": 0,
+        "ike_percentage": 0,
         "total_message_count": 0,
         "total_latency_avg": 0,
         "total_latency_std": 0,
@@ -334,17 +402,22 @@ def create_empty_combined_stats(prop):
     return combined_stats
 
 
-def process_ike_data(pcap_file, output_dir, prop, log_message):
+def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
     """main processing function"""
     log_message(f"Processing PCAP for proposal: {prop}")
 
-    # Extract packets
+    # Get total PCAP bytes first
+    total_pcap_bytes = get_total_pcap_bytes(pcap_file, log_message)
+
+    # Extract IKE packets
     packets = extract_ike_packets(pcap_file, log_message)
 
-    # Analyze packets (basic stats only)
-    combined_stats = analyze_packets(packets, prop, log_message)
+    # Analyze packets (basic stats only) with total PCAP bytes
+    combined_stats = analyze_packets(
+        packets, prop, log_message, total_pcap_bytes, iters
+    )
 
-    # Calculate latencies AND save CSV in one operation
+    # Calculate latencies and save CSV in one operation
     latency_results = calculate_latencies_and_save(
         packets, f"{output_dir}/detailed_latencies_{prop}.csv", log_message
     )
@@ -352,22 +425,14 @@ def process_ike_data(pcap_file, output_dir, prop, log_message):
     # Update combined stats with latency data
     update_stats_with_latencies(combined_stats, latency_results)
 
-    # Simple counters for backward compatibility
-    exchanges = [
-        "ike_sa_init",
-        "ike_intermediate",
-        "ike_auth",
-        "informational",
-        "create_child_sa",
-    ]
-
     # Log results
     total_latency_ms = combined_stats.get("total_latency_avg", 0) * 1000
     total_latency_std_ms = combined_stats.get("total_latency_std", 0) * 1000
     log_message(
-        f"Results for {prop}: {combined_stats['total_message_count']} packets, "
-        f"{combined_stats['total_ike_bytes']:,} bytes, "
-        f"{total_latency_ms:.2f}±{total_latency_std_ms:.2f}ms real avg latency"
+        f"Results for {prop}: {combined_stats['total_message_count']} IKE packets, "
+        f"{combined_stats['total_ike_bytes']:,} IKE bytes, "
+        f"{combined_stats['total_pcap_bytes']:,} total bytes, "
+        f"{total_latency_ms:.2f}±{total_latency_std_ms:.2f}ms avg latency"
     )
 
     return combined_stats, latency_results
@@ -393,12 +458,18 @@ def generate_pcap_report(
 
             # Basic metrics
             total_packets = row.get("total_message_count", 0)
-            total_bytes = row.get("total_ike_bytes", 0)
+            total_ike_bytes = row.get("total_ike_bytes", 0)
+            total_pcap_bytes = row.get("total_pcap_bytes", 0)
+            non_ike_bytes = row.get("non_ike_bytes", 0)
+            ike_percentage = row.get("ike_percentage", 0)
             total_latency_avg = row.get("total_latency_avg", 0)
             total_latency_std = row.get("total_latency_std", 0)
 
             f.write(f"Total IKE Packets: {total_packets}\n")
-            f.write(f"Total IKE Bytes: {total_bytes:,}\n")
+            f.write(f"Total IKE Bytes: {total_ike_bytes:,}\n")
+            f.write(f"Total PCAP Bytes: {total_pcap_bytes:,}\n")
+            f.write(f"Non-IKE Bytes: {non_ike_bytes:,}\n")
+            f.write(f"IKE Percentage: {ike_percentage:.1f}%\n")
             f.write(
                 f"Total Average Latency: {total_latency_avg:.6f} ± {total_latency_std:.6f} seconds "
                 f"({total_latency_avg*1000:.2f} ± {total_latency_std*1000:.2f} ms)\n\n"
@@ -464,15 +535,30 @@ def generate_pcap_report(
         # Overall summary
         if not df_bytes.empty:
             f.write("OVERALL SUMMARY\n===============\n\n")
-            total_bytes_all = df_bytes["total_ike_bytes"].sum()
-            total_msgs_all = df_bytes["total_message_count"].sum()
-            latency_avg_all = df_bytes["total_latency_avg"].mean()
-            latency_std_all = df_bytes["total_latency_std"].mean()
 
-            f.write(f"Total bytes processed: {total_bytes_all:,}\n")
-            f.write(f"Total messages processed: {total_msgs_all}\n")
+            # Use pandas aggregation functions
+            summary_stats = df_bytes.agg(
+                {
+                    "total_ike_bytes": "sum",
+                    "total_pcap_bytes": "sum",
+                    "total_message_count": "sum",
+                    "total_latency_avg": "mean",
+                    "total_latency_std": "mean",
+                }
+            )
+
             f.write(
-                f"Average handshake latency across all proposals: {latency_avg_all*1000:.2f} ± {latency_std_all*1000:.2f} ms\n"
+                f"Total IKE bytes processed: {summary_stats['total_ike_bytes']:,}\n"
+            )
+            f.write(
+                f"Total PCAP bytes processed: {summary_stats['total_pcap_bytes']:,}\n"
+            )
+            f.write(
+                f"Total messages processed: {summary_stats['total_message_count']:,}\n"
+            )
+            f.write(
+                f"Average handshake latency across all proposals: "
+                f"{summary_stats['total_latency_avg']*1000:.2f} ± {summary_stats['total_latency_std']*1000:.2f} ms\n"
             )
 
     # Save aggregated measurements

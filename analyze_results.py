@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
-import re
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -851,63 +851,349 @@ def analyze_plugin_timing(raw_csv_file, output_dir="analysis", log_scale=False):
     return True
 
 
-if __name__ == "__main__":
-    # Parse command line arguments
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print(
-            "  Single file mode: python analyze_plugin_timing.py <raw_timing_csv> [<output_dir>] [--log-scale]"
+import argparse
+import sys
+import os
+
+
+def parse_arguments():
+    """Parse command line arguments using argparse"""
+    parser = argparse.ArgumentParser(
+        description="Analyze StrongSwan QKD Plugin Performance Data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Plugin timing analysis only
+  python analyze_plugin_timing.py --plugin-timing plugin_timing_raw.csv --output analysis_output
+  
+  # PCAP bytes analysis only
+  python analyze_plugin_timing.py --pcap-bytes pcap_measurements.csv --output analysis_output
+  
+  # Combined analysis
+  python analyze_plugin_timing.py --plugin-timing plugin_raw.csv --pcap-bytes pcap_data.csv --output analysis_output
+  
+  # Network conditions comparison
+  python analyze_plugin_timing.py --network-compare dir1 dir2 dir3 --output network_analysis
+  
+  # With log-scale plots
+  python analyze_plugin_timing.py --plugin-timing data.csv --log-scale
+        """,
+    )
+
+    # Analysis options
+    parser.add_argument(
+        "--plugin-timing",
+        metavar="CSV_FILE",
+        help="Path to plugin timing raw CSV file (plugin_timing_raw.csv)",
+    )
+
+    parser.add_argument(
+        "--pcap-bytes",
+        metavar="CSV_FILE",
+        help="Path to PCAP bytes measurements CSV file (pcap_measurements.csv)",
+    )
+
+    parser.add_argument(
+        "--network-compare",
+        nargs="+",
+        metavar="DIR",
+        help="Compare plugin timing across multiple network condition directories",
+    )
+
+    # Output and formatting options
+    parser.add_argument(
+        "--output",
+        "-o",
+        default="analysis",
+        metavar="DIR",
+        help="Output directory for analysis results (default: analysis)",
+    )
+
+    parser.add_argument(
+        "--log-scale",
+        action="store_true",
+        help="Use logarithmic scale for timing plots",
+    )
+
+    return parser.parse_args()
+
+
+def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
+    """
+    Create a grouped bar chart showing bytes transmitted for different IKE exchange types per proposal
+
+    Args:
+        df_bytes: DataFrame with byte transmission data per proposal
+        output_path: Output file path for the plot
+        color_palette: Color palette to use for different exchange types
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Define exchange types to plot
+    exchange_types = [
+        ("ike_sa_init_bytes", "IKE_SA_INIT"),
+        ("ike_intermediate_bytes", "IKE_INTERMEDIATE"),
+        ("ike_auth_bytes", "IKE_AUTH"),
+        ("informational_bytes", "INFORMATIONAL"),
+        ("total_pcap_bytes", "TOTAL PCAP"),
+    ]
+
+    # Prepare data
+    proposals = df_bytes["proposal"].tolist()
+    n_proposals = len(proposals)
+    n_exchanges = len(exchange_types)
+
+    # Set up bar positions
+    bar_width = 0.18
+    x = np.arange(n_proposals)
+
+    # Colors for different exchange types
+    colors = [
+        color_palette[1],
+        color_palette[3],
+        color_palette[5],
+        color_palette[7],
+        color_palette[8],
+    ]
+
+    # Create bars for each exchange type
+    for i, (column, label) in enumerate(exchange_types):
+        # Get byte values for this exchange type
+        byte_values = df_bytes[column].values
+
+        # Calculate bar positions
+        bar_positions = x + (i - n_exchanges / 2 + 0.5) * bar_width
+
+        # Create bars
+        bars = ax.bar(
+            bar_positions,
+            byte_values,
+            bar_width,
+            label=label,
+            color=colors[i],
+            edgecolor="black",
+            linewidth=1.0,
+            alpha=0.8,
         )
-        print(
-            "  Network comparison mode: python analyze_plugin_timing.py --network-compare <dir1> <dir2> ... [--output <output_dir>] [--log-scale]"
-        )
-        print("\nExamples:")
-        print("  python analyze_plugin_timing.py timing_data.csv analysis_output")
-        print(
-            "  python analyze_plugin_timing.py timing_data.csv analysis_output --log-scale"
-        )
-        print(
-            "  python analyze_plugin_timing.py --network-compare lat0_* lat100_* --output network_analysis --log-scale"
-        )
-        sys.exit(1)
 
-    # Check for log-scale flag
-    log_scale = "--log-scale" in sys.argv
-    if log_scale:
-        sys.argv.remove("--log-scale")  # Remove it from argv for easier parsing
+        # Add value labels on bars
+        for bar, value in zip(bars, byte_values):
+            if value > 0:  # Only show labels for non-zero values
+                height = bar.get_height()
+                # Format bytes with commas for readability
+                label_text = f"{int(value):,}" if value >= 1000 else f"{int(value)}"
 
-    if sys.argv[1] == "--network-compare":
-        # Network comparison mode
-        result_dirs = []
-        output_dir = "analysis_network_comparison"
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + max(df_bytes["total_pcap_bytes"]) * 0.01,
+                    label_text,
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    fontweight="bold",
+                    rotation=(
+                        90 if value > max(df_bytes["total_pcap_bytes"]) * 0.1 else 0
+                    ),
+                )
 
-        i = 2
-        while i < len(sys.argv):
-            if sys.argv[i] == "--output":
-                if i + 1 < len(sys.argv):
-                    output_dir = sys.argv[i + 1]
-                    i += 2
-                else:
-                    print("Error: --output requires a directory name")
-                    sys.exit(1)
-            else:
-                result_dirs.append(sys.argv[i])
-                i += 1
+    # Customize plot
+    ax.set_title(
+        "Bytes Transmitted by IKE Exchange Type and Proposal",
+        fontweight="bold",
+        fontsize=16,
+        pad=20,
+    )
+    ax.set_ylabel("Bytes Transmitted", fontweight="bold", fontsize=12, labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
 
-        if len(result_dirs) < 2:
-            print("Error: Network comparison mode requires at least 2 directories")
-            sys.exit(1)
+    # Set x-axis
+    ax.set_xticks(x)
+    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
 
-        # Run network conditions analysis
+    # Add legend
+    ax.legend(loc="upper right", fontsize=11, framealpha=0.9)
+
+    # Format y-axis to show values with commas
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Created bytes transmission plot: {output_path}")
+
+
+def analyze_bytes_data(bytes_csv_file, output_dir="analysis"):
+    """
+    Analyze bytes data and create visualization
+
+    Args:
+        bytes_csv_file: Path to CSV file with bytes data
+        output_dir: Output directory for results
+    """
+    # Set up matplotlib styling
+    color_palette = setup_matplotlib_styling()
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load bytes data
+    print(f"Loading bytes data from {bytes_csv_file}...")
+    try:
+        df_bytes = pd.read_csv(bytes_csv_file)
+        print(f"Loaded {len(df_bytes)} proposals")
+
+        # Create bytes plot
+        bytes_plot_path = f"{output_dir}/ike_bytes_by_exchange.pdf"
+        plot_ike_bytes_by_exchange(df_bytes, bytes_plot_path, color_palette)
+
+        # Print summary to console
+        print("\nIKE Bytes Summary:")
+        print("-" * 50)
+        for _, row in df_bytes.iterrows():
+            proposal = row["proposal"]
+            total_bytes = row["total_ike_bytes"]
+            sa_init_bytes = row["ike_sa_init_bytes"]
+            intermediate_bytes = row["ike_intermediate_bytes"]
+            auth_bytes = row["ike_auth_bytes"]
+
+            print(f"{proposal}:")
+            print(f"  Total: {total_bytes:,} bytes")
+            print(
+                f"  IKE_SA_INIT: {sa_init_bytes:,} bytes ({sa_init_bytes/total_bytes*100:.1f}%)"
+            )
+            if intermediate_bytes > 0:
+                print(
+                    f"  IKE_INTERMEDIATE: {intermediate_bytes:,} bytes ({intermediate_bytes/total_bytes*100:.1f}%)"
+                )
+            print(
+                f"  IKE_AUTH: {auth_bytes:,} bytes ({auth_bytes/total_bytes*100:.1f}%)"
+            )
+            print()
+
+        return True
+
+    except Exception as e:
+        print(f"Error analyzing bytes data: {e}")
+        return False
+
+
+def parse_arguments():
+    """Parse command line arguments using argparse"""
+    parser = argparse.ArgumentParser(
+        description="Analyze StrongSwan QKD Plugin Performance Data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Plugin timing analysis only
+  python analyze_plugin_timing.py --plugin-timing plugin_timing_raw.csv --output analysis_output
+  
+  # PCAP bytes analysis only
+  python analyze_plugin_timing.py --pcap-bytes pcap_measurements.csv --output analysis_output
+  
+  # Combined analysis
+  python analyze_plugin_timing.py --plugin-timing plugin_raw.csv --pcap-bytes pcap_data.csv --output analysis_output
+  
+  # Network conditions comparison
+  python analyze_plugin_timing.py --network-compare dir1 dir2 dir3 --output network_analysis
+  
+  # With log-scale plots
+  python analyze_plugin_timing.py --plugin-timing data.csv --log-scale
+        """,
+    )
+
+    # Analysis options
+    parser.add_argument(
+        "--plugin-timing",
+        metavar="CSV_FILE",
+        help="Path to plugin timing raw CSV file (plugin_timing_raw.csv)",
+    )
+
+    parser.add_argument(
+        "--pcap-bytes",
+        metavar="CSV_FILE",
+        help="Path to PCAP bytes measurements CSV file (pcap_measurements.csv)",
+    )
+
+    parser.add_argument(
+        "--network-compare",
+        nargs="+",
+        metavar="DIR",
+        help="Compare plugin timing across multiple network condition directories",
+    )
+
+    # Output and formatting options
+    parser.add_argument(
+        "--output",
+        "-o",
+        default="analysis",
+        metavar="DIR",
+        help="Output directory for analysis results (default: analysis)",
+    )
+
+    parser.add_argument(
+        "--log-scale",
+        action="store_true",
+        help="Use logarithmic scale for timing plots",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    """Main function with proper argument parsing"""
+    args = parse_arguments()
+
+    # Validate that at least one analysis is requested
+    if not (args.plugin_timing or args.pcap_bytes or args.network_compare):
+        print("Error: Please specify at least one analysis type:")
+        print("  --plugin-timing <file>   for plugin timing analysis")
+        print("  --pcap-bytes <file>      for PCAP bytes analysis")
+        print("  --network-compare <dirs> for network comparison")
+        print("\nUse --help for detailed usage information")
+        return 1
+
+    # Create output directory
+    os.makedirs(args.output, exist_ok=True)
+
+    success = True
+
+    # Network comparison mode
+    if args.network_compare:
+        print("Running network conditions comparison analysis...")
         success = analyze_network_conditions(
-            result_dirs, output_dir, log_scale=log_scale
+            args.network_compare, args.output, log_scale=args.log_scale
         )
+
     else:
-        # Single file mode
-        csv_file = sys.argv[1]
-        output_dir = sys.argv[2] if len(sys.argv) > 2 else "analysis"
+        # Individual analyses
+        if args.plugin_timing:
+            print("Running plugin timing analysis...")
+            timing_success = analyze_plugin_timing(
+                args.plugin_timing, args.output, log_scale=args.log_scale
+            )
+            success = success and timing_success
 
-        # Run standard analysis
-        success = analyze_plugin_timing(csv_file, output_dir)
+        if args.pcap_bytes:
+            print("Running PCAP bytes analysis...")
+            bytes_success = analyze_bytes_data(args.pcap_bytes, args.output)
+            success = success and bytes_success
 
-    sys.exit(0 if success else 1)
+    if success:
+        print(f"\n✓ Analysis completed successfully! Results saved to: {args.output}/")
+    else:
+        print("\n✗ Analysis completed with errors. Check the output above.")
+
+    return 0 if success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
