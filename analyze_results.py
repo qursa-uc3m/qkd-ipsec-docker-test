@@ -1229,7 +1229,7 @@ def load_and_compute_combined_timing(plugin_raw_csv, pcap_csv):
         plugin_stats = aggregate_timing_statistics(plugin_timing_df)
 
         # Merge with PCAP data
-        df_combined = pd.merge(plugin_stats, df_pcap, on="proposal", how="inner")
+        df_combined = pd.merge(df_pcap, plugin_stats, on="proposal", how="inner")
         if len(df_combined) == 0:
             raise ValueError("No common proposals found")
 
@@ -1319,6 +1319,7 @@ def plot_raw_timing_comparison(
     df_plot = generate_raw_boxplot_data(df_combined, plugin_timing_df)
 
     fig, ax = plt.subplots(figsize=(14, 8))
+    # REMOVED: ax.set_yscale("log") - this was causing the issues
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.set_axisbelow(True)
 
@@ -1446,7 +1447,7 @@ Examples:
   python analyze_plugin_timing.py --network-compare dir1 dir2 dir3 --output network_analysis
   
   # Bytes comparison between two files
-  python analyze_plugin_timing.py --compare-files baseline.csv comparison.csv --output comparison_analysis
+  python analyze_plugin_timing.py --compare-bytes baseline.csv comparison.csv --output comparison_analysis
   
   # With log-scale plots
   python analyze_plugin_timing.py --plugin-timing data.csv --log-scale
@@ -1474,7 +1475,7 @@ Examples:
     )
 
     parser.add_argument(
-        "--compare-files",
+        "--compare-bytes",
         nargs=2,
         metavar=("BASELINE", "COMPARISON"),
         help="Compare bytes between two CSV files (baseline comparison)",
@@ -1507,13 +1508,13 @@ def main():
         args.plugin_timing
         or args.pcap_bytes
         or args.network_compare
-        or args.compare_files
+        or args.compare_bytes
     ):
         print("Error: Please specify at least one analysis type:")
         print("  --plugin-timing <file>       for plugin timing analysis")
         print("  --pcap-bytes <file>          for PCAP bytes analysis")
         print("  --network-compare <dirs>     for network comparison")
-        print("  --compare-files <baseline> <comparison> for file comparison")
+        print("  --compare-bytes <baseline> <comparison> for file comparison")
         print("\nUse --help for detailed usage information")
         return 1
 
@@ -1523,9 +1524,9 @@ def main():
     success = True
 
     # File comparison mode
-    if args.compare_files:
+    if args.compare_bytes:
         print("Running file comparison analysis...")
-        baseline_file, comparison_file = args.compare_files
+        baseline_file, comparison_file = args.compare_bytes
         comparison_success = compare_bytes_data(
             baseline_file, comparison_file, args.output
         )
