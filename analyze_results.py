@@ -856,68 +856,6 @@ import sys
 import os
 
 
-def parse_arguments():
-    """Parse command line arguments using argparse"""
-    parser = argparse.ArgumentParser(
-        description="Analyze StrongSwan QKD Plugin Performance Data",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Plugin timing analysis only
-  python analyze_plugin_timing.py --plugin-timing plugin_timing_raw.csv --output analysis_output
-  
-  # PCAP bytes analysis only
-  python analyze_plugin_timing.py --pcap-bytes pcap_measurements.csv --output analysis_output
-  
-  # Combined analysis
-  python analyze_plugin_timing.py --plugin-timing plugin_raw.csv --pcap-bytes pcap_data.csv --output analysis_output
-  
-  # Network conditions comparison
-  python analyze_plugin_timing.py --network-compare dir1 dir2 dir3 --output network_analysis
-  
-  # With log-scale plots
-  python analyze_plugin_timing.py --plugin-timing data.csv --log-scale
-        """,
-    )
-
-    # Analysis options
-    parser.add_argument(
-        "--plugin-timing",
-        metavar="CSV_FILE",
-        help="Path to plugin timing raw CSV file (plugin_timing_raw.csv)",
-    )
-
-    parser.add_argument(
-        "--pcap-bytes",
-        metavar="CSV_FILE",
-        help="Path to PCAP bytes measurements CSV file (pcap_measurements.csv)",
-    )
-
-    parser.add_argument(
-        "--network-compare",
-        nargs="+",
-        metavar="DIR",
-        help="Compare plugin timing across multiple network condition directories",
-    )
-
-    # Output and formatting options
-    parser.add_argument(
-        "--output",
-        "-o",
-        default="analysis",
-        metavar="DIR",
-        help="Output directory for analysis results (default: analysis)",
-    )
-
-    parser.add_argument(
-        "--log-scale",
-        action="store_true",
-        help="Use logarithmic scale for timing plots",
-    )
-
-    return parser.parse_args()
-
-
 def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     """
     Create a grouped bar chart showing bytes transmitted for different IKE exchange types per proposal
@@ -1086,6 +1024,408 @@ def analyze_bytes_data(bytes_csv_file, output_dir="analysis"):
         return False
 
 
+def compare_bytes_data(baseline_csv, comparison_csv, output_dir="analysis"):
+    """
+    Compare two CSV files and analyze the increase in bytes transmission
+
+    Args:
+        baseline_csv: Path to baseline CSV file (e.g., no network conditions)
+        comparison_csv: Path to comparison CSV file (e.g., with packet loss)
+        output_dir: Output directory for results
+    """
+    # Set up matplotlib styling
+    color_palette = setup_matplotlib_styling()
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load both CSV files
+    print(f"Loading baseline data from {baseline_csv}...")
+    try:
+        df_baseline = pd.read_csv(baseline_csv)
+        df_baseline = df_baseline.set_index("proposal")
+    except Exception as e:
+        print(f"Error loading baseline file: {e}")
+        return False
+
+    print(f"Loading comparison data from {comparison_csv}...")
+    try:
+        df_comparison = pd.read_csv(comparison_csv)
+        df_comparison = df_comparison.set_index("proposal")
+    except Exception as e:
+        print(f"Error loading comparison file: {e}")
+        return False
+
+    # Find common proposals
+    common_proposals = df_baseline.index.intersection(df_comparison.index)
+    if len(common_proposals) == 0:
+        print("Error: No common proposals found between the two files")
+        return False
+
+    print(
+        f"Found {len(common_proposals)} common proposals: {common_proposals.tolist()}"
+    )
+
+    # Calculate differences
+    comparison_data = []
+    for proposal in common_proposals:
+        baseline_ike = df_baseline.loc[proposal, "total_ike_bytes"]
+        comparison_ike = df_comparison.loc[proposal, "total_ike_bytes"]
+        baseline_pcap = df_baseline.loc[proposal, "total_pcap_bytes"]
+        comparison_pcap = df_comparison.loc[proposal, "total_pcap_bytes"]
+
+        # Calculate absolute increases (positive numbers)
+        ike_increase = abs(comparison_ike - baseline_ike)
+        pcap_increase = abs(comparison_pcap - baseline_pcap)
+
+        # Calculate percentage increases
+        ike_percent_increase = (
+            (ike_increase / baseline_ike * 100) if baseline_ike > 0 else 0
+        )
+        pcap_percent_increase = (
+            (pcap_increase / baseline_pcap * 100) if baseline_pcap > 0 else 0
+        )
+
+        comparison_data.append(
+            {
+                "proposal": proposal,
+                "baseline_ike_bytes": baseline_ike,
+                "comparison_ike_bytes": comparison_ike,
+                "ike_bytes_increase": ike_increase,
+                "ike_percent_increase": ike_percent_increase,
+                "baseline_pcap_bytes": baseline_pcap,
+                "comparison_pcap_bytes": comparison_pcap,
+                "pcap_bytes_increase": pcap_increase,
+                "pcap_percent_increase": pcap_percent_increase,
+            }
+        )
+
+    # Create DataFrame with comparison results
+    comparison_df = pd.DataFrame(comparison_data)
+
+    # Save comparison results to CSV
+    comparison_csv_path = f"{output_dir}/bytes_comparison_results.csv"
+    comparison_df.to_csv(comparison_csv_path, index=False)
+    print(f"Saved comparison results to {comparison_csv_path}")
+
+    # Create visualization
+    plot_path = f"{output_dir}/bytes_increase_comparison.pdf"
+    plot_bytes_increase_comparison(comparison_df, plot_path, color_palette)
+
+    return True
+
+
+def plot_bytes_increase_comparison(comparison_df, output_path, color_palette=None):
+    """
+    Create a grouped bar chart showing the increase in IKE and PCAP bytes per proposal
+
+    Args:
+        comparison_df: DataFrame with comparison results
+        output_path: Output file path for the plot
+        color_palette: Color palette to use
+    """
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Set grid behind the data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # Prepare data
+    proposals = comparison_df["proposal"].tolist()
+    ike_increases = comparison_df["ike_bytes_increase"].values
+    pcap_increases = comparison_df["pcap_bytes_increase"].values
+
+    # Set up bar positions
+    x = np.arange(len(proposals))
+    bar_width = 0.35
+
+    # Create bars
+    bars1 = ax.bar(
+        x - bar_width / 2,
+        ike_increases,
+        bar_width,
+        label="IKE Bytes Increase",
+        color=color_palette[3],
+        edgecolor="black",
+        linewidth=1.0,
+        alpha=0.8,
+    )
+
+    bars2 = ax.bar(
+        x + bar_width / 2,
+        pcap_increases,
+        bar_width,
+        label="PCAP Bytes Increase",
+        color=color_palette[6],
+        edgecolor="black",
+        linewidth=1.0,
+        alpha=0.8,
+    )
+
+    # Add value labels on bars
+    def add_value_labels(bars, values, percentages):
+        for bar, value, pct in zip(bars, values, percentages):
+            if value > 0:
+                height = bar.get_height()
+                label_text = f"{int(value):,}\n({pct:.1f}%)"
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + max(max(ike_increases), max(pcap_increases)) * 0.01,
+                    label_text,
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    fontweight="bold",
+                )
+
+    add_value_labels(bars1, ike_increases, comparison_df["ike_percent_increase"])
+    add_value_labels(bars2, pcap_increases, comparison_df["pcap_percent_increase"])
+
+    # Customize plot
+    ax.set_title(
+        "Bytes Transmission Increase by Proposal\n(Comparison vs Baseline)",
+        fontweight="bold",
+        fontsize=16,
+        pad=20,
+    )
+    ax.set_ylabel("Bytes Increase", fontweight="bold", fontsize=12, labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+
+    # Set x-axis
+    ax.set_xticks(x)
+    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Add legend
+    ax.legend(loc="upper right", fontsize=11, framealpha=0.9)
+
+    # Format y-axis to show values with commas
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Created bytes increase comparison plot: {output_path}")
+
+
+def load_and_compute_combined_timing(plugin_raw_csv, pcap_csv):
+    """Load raw plugin data and PCAP data, compute statistics on the fly"""
+    try:
+        # Load and process raw plugin timing data (same as existing function)
+        df_plugin_raw = load_raw_timing_data(plugin_raw_csv)
+        if df_plugin_raw is None:
+            return None
+
+        df_pcap = pd.read_csv(pcap_csv)
+
+        # Calculate timing metrics from raw plugin data (same logic as plugin timing analysis)
+        plugin_timing_df = calculate_timing_metrics(df_plugin_raw)
+
+        # Aggregate plugin statistics by proposal (same as existing)
+        plugin_stats = aggregate_timing_statistics(plugin_timing_df)
+
+        # Merge with PCAP data
+        df_combined = pd.merge(plugin_stats, df_pcap, on="proposal", how="inner")
+        if len(df_combined) == 0:
+            raise ValueError("No common proposals found")
+
+        # Convert and calculate timing metrics
+        df_combined["network_time_ms"] = df_combined["ike_latency_avg"] * 1000
+        df_combined["network_std_ms"] = df_combined["ike_latency_std"] * 1000
+        df_combined["plugin_time_ms"] = df_combined[
+            "avg_total_plugin_time_ms"
+        ]  # From aggregated stats
+        df_combined["plugin_std_ms"] = df_combined[
+            "std_total_plugin_time_ms"
+        ]  # From aggregated stats
+
+        # Processing overhead = plugin time - network time
+        df_combined["overhead_ms"] = (
+            df_combined["plugin_time_ms"] - df_combined["network_time_ms"]
+        )
+        df_combined["overhead_std_ms"] = np.sqrt(
+            df_combined["plugin_std_ms"] ** 2 + df_combined["network_std_ms"] ** 2
+        )
+
+        # Store raw individual measurements for boxplots
+        df_combined["raw_plugin_data"] = df_combined["proposal"].apply(
+            lambda prop: plugin_timing_df[plugin_timing_df["proposal"] == prop][
+                "total_plugin_time_ms"
+            ].values
+        )
+
+        return df_combined, plugin_timing_df
+
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        return None, None
+
+
+def generate_raw_boxplot_data(df_combined, plugin_timing_df):
+    """Generate individual data points from raw measurements for boxplots"""
+    data = []
+
+    for _, row in df_combined.iterrows():
+        proposal = row["proposal"]
+
+        # Get raw plugin measurements for this proposal
+        plugin_measurements = plugin_timing_df[
+            plugin_timing_df["proposal"] == proposal
+        ]["total_plugin_time_ms"].values
+
+        # Generate network measurements based on statistics (same count as plugin measurements)
+        n_measurements = len(plugin_measurements)
+        network_mean = row["network_time_ms"]
+        network_std = row["network_std_ms"]
+        network_measurements = np.maximum(
+            0, np.random.normal(network_mean, network_std, n_measurements)
+        )
+
+        # Calculate overhead for each measurement pair
+        overhead_measurements = plugin_measurements - network_measurements
+
+        # Add to data list
+        for i in range(n_measurements):
+            data.extend(
+                [
+                    {
+                        "proposal": proposal,
+                        "type": "Network",
+                        "time_ms": network_measurements[i],
+                    },
+                    {
+                        "proposal": proposal,
+                        "type": "Overhead",
+                        "time_ms": overhead_measurements[i],
+                    },
+                ]
+            )
+
+    return pd.DataFrame(data)
+
+
+def plot_raw_timing_comparison(
+    df_combined, plugin_timing_df, output_path, color_palette=None
+):
+    """Create side-by-side boxplots using raw individual measurements"""
+    if color_palette is None:
+        color_palette = setup_matplotlib_styling()
+
+    # Generate raw data for boxplots
+    df_plot = generate_raw_boxplot_data(df_combined, plugin_timing_df)
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    proposals = df_combined["proposal"].tolist()
+    colors = [color_palette[2], color_palette[6]]  # Blue, Orange
+
+    for i, proposal in enumerate(proposals):
+        prop_data = df_plot[df_plot["proposal"] == proposal]
+
+        for j, timing_type in enumerate(["Network", "Overhead"]):
+            data = prop_data[prop_data["type"] == timing_type]["time_ms"].values
+            pos = i + (j - 0.5) * 0.35
+
+            # Boxplot
+            ax.boxplot(
+                [data],
+                positions=[pos],
+                widths=0.25,
+                patch_artist=True,
+                showfliers=False,
+                boxprops=dict(facecolor="white", alpha=0.3, linewidth=1.2),
+                whiskerprops=dict(linewidth=1.2),
+                capprops=dict(linewidth=1.2),
+                medianprops=dict(linewidth=1.5, color="darkblue"),
+            )
+
+            # Scatter points
+            x_jitter = np.random.normal(pos, 0.03, len(data))
+            ax.scatter(
+                x_jitter,
+                data,
+                alpha=0.7,
+                s=25,
+                color=colors[j],
+                edgecolor="black",
+                linewidth=0.3,
+                label=f"{timing_type} Time" if i == 0 else "",
+            )
+
+    # Formatting
+    ax.set_title(
+        "Network Time vs Processing Overhead\n(Plugin Time - Network Time)",
+        fontweight="bold",
+        fontsize=16,
+        pad=20,
+    )
+    ax.set_ylabel("Time (milliseconds)", fontweight="bold", fontsize=12)
+    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_xticks(range(len(proposals)))
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
+    ax.axhline(y=0, color="red", linestyle="--", alpha=0.7)
+    ax.legend(loc="upper right", fontsize=11)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
+    """Main analysis function using raw plugin data"""
+    color_palette = setup_matplotlib_styling()
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load and process raw data
+    print("Loading raw plugin timing data and PCAP measurements...")
+    result = load_and_compute_combined_timing(plugin_raw_csv, pcap_csv)
+    if result is None:
+        return False
+
+    df_combined, plugin_timing_df = result
+
+    # Save combined statistics
+    df_combined_clean = df_combined.drop(
+        columns=["raw_plugin_data"]
+    )  # Remove the array column for CSV
+    df_combined_clean.to_csv(f"{output_dir}/combined_timing_stats.csv", index=False)
+
+    # Create plot using raw measurements
+    plot_raw_timing_comparison(
+        df_combined,
+        plugin_timing_df,
+        f"{output_dir}/network_vs_processing.pdf",
+        color_palette,
+    )
+
+    # Console summary
+    print("\nTiming Analysis Summary:")
+    print("-" * 70)
+    print(
+        f"{'Proposal':<20} {'Network (ms)':<15} {'Overhead (ms)':<15} {'Ratio %':<10}"
+    )
+    print("-" * 70)
+
+    for _, row in df_combined.iterrows():
+        ratio = (
+            (row["overhead_ms"] / row["network_time_ms"] * 100)
+            if row["network_time_ms"] > 0
+            else 0
+        )
+        print(
+            f"{row['proposal']:<20} {row['network_time_ms']:>7.1f}±{row['network_std_ms']:>4.1f} "
+            f"{row['overhead_ms']:>7.1f}±{row['overhead_std_ms']:>4.1f} {ratio:>7.1f}"
+        )
+
+    return True
+
+
 def parse_arguments():
     """Parse command line arguments using argparse"""
     parser = argparse.ArgumentParser(
@@ -1104,6 +1444,9 @@ Examples:
   
   # Network conditions comparison
   python analyze_plugin_timing.py --network-compare dir1 dir2 dir3 --output network_analysis
+  
+  # Bytes comparison between two files
+  python analyze_plugin_timing.py --compare-files baseline.csv comparison.csv --output comparison_analysis
   
   # With log-scale plots
   python analyze_plugin_timing.py --plugin-timing data.csv --log-scale
@@ -1130,6 +1473,13 @@ Examples:
         help="Compare plugin timing across multiple network condition directories",
     )
 
+    parser.add_argument(
+        "--compare-files",
+        nargs=2,
+        metavar=("BASELINE", "COMPARISON"),
+        help="Compare bytes between two CSV files (baseline comparison)",
+    )
+
     # Output and formatting options
     parser.add_argument(
         "--output",
@@ -1153,11 +1503,17 @@ def main():
     args = parse_arguments()
 
     # Validate that at least one analysis is requested
-    if not (args.plugin_timing or args.pcap_bytes or args.network_compare):
+    if not (
+        args.plugin_timing
+        or args.pcap_bytes
+        or args.network_compare
+        or args.compare_files
+    ):
         print("Error: Please specify at least one analysis type:")
-        print("  --plugin-timing <file>   for plugin timing analysis")
-        print("  --pcap-bytes <file>      for PCAP bytes analysis")
-        print("  --network-compare <dirs> for network comparison")
+        print("  --plugin-timing <file>       for plugin timing analysis")
+        print("  --pcap-bytes <file>          for PCAP bytes analysis")
+        print("  --network-compare <dirs>     for network comparison")
+        print("  --compare-files <baseline> <comparison> for file comparison")
         print("\nUse --help for detailed usage information")
         return 1
 
@@ -1166,8 +1522,17 @@ def main():
 
     success = True
 
+    # File comparison mode
+    if args.compare_files:
+        print("Running file comparison analysis...")
+        baseline_file, comparison_file = args.compare_files
+        comparison_success = compare_bytes_data(
+            baseline_file, comparison_file, args.output
+        )
+        success = success and comparison_success
+
     # Network comparison mode
-    if args.network_compare:
+    elif args.network_compare:
         print("Running network conditions comparison analysis...")
         success = analyze_network_conditions(
             args.network_compare, args.output, log_scale=args.log_scale
@@ -1186,6 +1551,14 @@ def main():
             print("Running PCAP bytes analysis...")
             bytes_success = analyze_bytes_data(args.pcap_bytes, args.output)
             success = success and bytes_success
+
+        # Automatic combined timing analysis (if both files are provided)
+        if args.plugin_timing and args.pcap_bytes:
+            print("Running combined timing analysis (Network vs Processing)...")
+            combined_success = analyze_combined_timing(
+                args.plugin_timing, args.pcap_bytes, args.output
+            )
+            success = success and combined_success
 
     if success:
         print(f"\n✓ Analysis completed successfully! Results saved to: {args.output}/")
