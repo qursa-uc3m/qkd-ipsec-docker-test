@@ -92,6 +92,7 @@ class QKDTestOrchestrator:
 
         etsi_version = self.config["docker"]["qkd"].get("etsi_api_version")
         backend = self.config["docker"]["qkd"].get("backend")
+        initiation_mode = self.config["docker"]["qkd"].get("initiation_mode", "client")
 
         if not etsi_version or not backend:
             print("Warning: ETSI API version or QKD backend not specified")
@@ -119,6 +120,15 @@ class QKDTestOrchestrator:
 
             sys.exit(1)
 
+        if etsi_version == "004" and initiation_mode == "server":
+            print(
+                "Error: Server-initiated QKD mode is not compatible with ETSI 004 API"
+            )
+            print(
+                "Use ETSI 014 API with server-initiated mode, or use client-initiated mode with ETSI 004"
+            )
+            sys.exit(1)
+
     def _apply_cli_overrides(self, args):
         """Apply command line argument overrides to configuration."""
         etsi_version_changed = False
@@ -136,6 +146,9 @@ class QKDTestOrchestrator:
         if args.qkd_backend is not None:
             self.config["docker"]["qkd"]["backend"] = args.qkd_backend
             backend_changed = True
+
+        if args.qkd_initiation_mode is not None:
+            self.config["docker"]["qkd"]["initiation_mode"] = args.qkd_initiation_mode
 
         # If either changed, but not both, validate compatibility
         if etsi_version_changed or backend_changed:
@@ -185,16 +198,22 @@ class QKDTestOrchestrator:
         # Extract config values
         etsi_version = self.config["docker"]["qkd"]["etsi_api_version"]
         qkd_backend = self.config["docker"]["qkd"]["backend"]
+        initiation_mode = self.config["docker"]["qkd"].get("initiation_mode", "client")
         iterations = self.config["test"]["iterations"]
 
+        path_components = [etsi_version, qkd_backend, initiation_mode + "_init"]
         # Create directory path based on network conditions
         if self.config["test"]["network"]["apply"]:
-            latency = self.config["test"]["network"]["latency"]
-            jitter = self.config["test"]["network"]["jitter"]
-            loss = self.config["test"]["network"]["packet_loss"]
-            relative_dir = f"{etsi_version}/{qkd_backend}/lat{latency}_jit{jitter}_loss{loss}_iter{iterations}_time_{self.timestamp}"
+            network_config = self.config["test"]["network"]
+            network_part = f"lat{network_config['latency']}_jit{network_config['jitter']}_loss{network_config['packet_loss']}"
+            path_components.append(network_part)
         else:
-            relative_dir = f"{etsi_version}/{qkd_backend}/no_network_conditions_iter{iterations}_{self.timestamp}"
+            path_components.append("no_network_conditions")
+
+        path_components.extend([f"iter{iterations}", f"time_{self.timestamp}"])
+
+        # Join all components
+        relative_dir = "/".join(path_components)
 
         # Define directory paths
         dirs = {
@@ -247,6 +266,7 @@ class QKDTestOrchestrator:
         """Create a JSON file with test configuration details."""
         etsi_version = self.config["docker"]["qkd"]["etsi_api_version"]
         qkd_backend = self.config["docker"]["qkd"]["backend"]
+        initiation_mode = self.config["docker"]["qkd"]["initiation_mode"]
         iterations = self.config["test"]["iterations"]
         network_config = self.config["test"]["network"]
 
@@ -254,6 +274,7 @@ class QKDTestOrchestrator:
             "timestamp": self.timestamp,
             "etsi_api_version": etsi_version,
             "qkd_backend": qkd_backend,
+            "initiation_mode": initiation_mode,
             "iterations": iterations,
             "network_conditions": {
                 "applied": network_config["apply"],
@@ -426,6 +447,9 @@ class QKDTestOrchestrator:
         return {
             "ETSI_API_VERSION": self.config["docker"]["qkd"]["etsi_api_version"],
             "QKD_BACKEND": self.config["docker"]["qkd"]["backend"],
+            "QKD_INITIATION_MODE": self.config["docker"]["qkd"].get(
+                "initiation_mode", "client"
+            ),
             "ACCOUNT_ID": self.config["docker"]["qkd"]["account_id"],
             "STRONGSWAN_VERSION": self.config["docker"]["build"]["strongswan_version"],
             "BUILD_QKD_ETSI": str(
@@ -481,6 +505,7 @@ class QKDTestOrchestrator:
         """Display the current build configuration."""
         etsi_version = self.config["docker"]["qkd"]["etsi_api_version"]
         qkd_backend = self.config["docker"]["qkd"]["backend"]
+        initiation_mode = self.config["docker"]["qkd"].get("initiation_mode", "client")
         account_id = self.config["docker"]["qkd"]["account_id"]
         strongswan_version = self.config["docker"]["build"]["strongswan_version"]
         build_qkd_etsi = self.config["docker"]["build"]["build_qkd_etsi"]
@@ -492,6 +517,7 @@ class QKDTestOrchestrator:
             f"{qkd_backend} (Account: {account_id})" if account_id else qkd_backend
         )
         print(f"  - QKD Backend: {qkd_service}")
+        print(f"  - QKD Initiation Mode: {initiation_mode}")
         print(f"  - StrongSwan Version: {strongswan_version}")
         print(f"  - Build QKD ETSI API: {build_qkd_etsi}")
         print(f"  - Build QKD-KEM Provider: {build_qkd_kem}")
@@ -1062,6 +1088,12 @@ def parse_arguments():
         type=str,
         choices=["python-client", "qukaydee", "cerberis-xgr", "simulated"],
         help="QKD backend to use",
+    )
+    parser.add_argument(
+        "--qkd-initiation-mode",
+        type=str,
+        choices=["client", "server"],
+        help="QKD initiation mode (client or server)",
     )
     parser.add_argument(
         "--iterations", "-i", type=int, help="Override number of test iterations"

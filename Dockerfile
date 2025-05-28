@@ -8,6 +8,7 @@ ARG QKD_BACKEND=simulated
 ARG ACCOUNT_ID=
 ARG ETSI_API_VERSION=014
 ARG STRONGSWAN_VERSION=6.0.0beta6
+ARG QKD_INITIATION_MODE=client
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,6 +20,7 @@ ENV QKD_BACKEND=${QKD_BACKEND}
 ENV ACCOUNT_ID=${ACCOUNT_ID}
 ENV ETSI_API_VERSION=${ETSI_API_VERSION}
 ENV STRONGSWAN_VERSION=${STRONGSWAN_VERSION}
+ENV QKD_INITIATION_MODE=${QKD_INITIATION_MODE}
 
 # Install build dependencies and testing tools
 RUN apt-get update && apt-get install -y \
@@ -128,6 +130,7 @@ RUN autoreconf -i && \
     --with-qkd-etsi-api=/usr/local \
     --with-qkd-kem-provider=/usr/local/lib/ossl-modules \
     --with-etsi-api-version=${ETSI_API_VERSION} \
+    --with-qkd-initiation-mode=${QKD_INITIATION_MODE} \
     --enable-qkd \
     $([ "$BUILD_QKD_KEM" = "true" ] && echo "--enable-qkd-kem" || echo "--disable-qkd-kem") \
     && make \
