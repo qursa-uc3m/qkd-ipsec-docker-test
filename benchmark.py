@@ -19,7 +19,11 @@ import time
 import yaml
 import docker
 from pathlib import Path
-from benchmark_utils.logs import log_versions, log_python_packages
+from benchmark_utils.logs import (
+    log_versions,
+    log_python_packages,
+    log_network_configuration,
+)
 
 # Default configuration values
 DEFAULT_CONFIG_FILE = "config/shared/benchmark_config.yml"
@@ -992,10 +996,11 @@ class QKDTestOrchestrator:
                     print("Cannot proceed without running containers.")
                     return 1
 
-            # Log environment versions and Python packages for reproducibility
+            # Log environment versions, Python packages and network parameters for reproducibility
             print("Logging environment versions for reproducibility...")
             log_versions(self, self.dirs["output_dir"])
             log_python_packages(self, self.dirs["output_dir"])
+            log_network_configuration(self, self.dirs["output_dir"])
 
             # Run tests (containers are now guaranteed to be running)
             self.run_tests()

@@ -96,6 +96,215 @@ def log_versions(orchestrator, output_dir):
     return versions
 
 
+def log_network_configuration(orchestrator, output_dir):
+    """Log network configuration including MTU settings for scientific reproducibility."""
+
+    network_info = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "host_network": {},
+        "container_network": {},
+        "docker_network": {},
+        "fragmentation_settings": {},
+    }
+
+    print("=== Logging Network Configuration ===")
+
+    # Check host MTU
+    try:
+        result = subprocess.run(
+            ["ip", "link", "show"], capture_output=True, text=True, check=True
+        )
+
+        host_interfaces = {}
+        for line in result.stdout.split("\n"):
+            if "mtu" in line.lower():
+                # Parse interface name and MTU
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    interface = parts[1].rstrip(":")
+                    mtu_idx = next(
+                        (i for i, part in enumerate(parts) if part == "mtu"), None
+                    )
+                    if mtu_idx and mtu_idx + 1 < len(parts):
+                        mtu = parts[mtu_idx + 1]
+                        host_interfaces[interface] = {
+                            "mtu": mtu,
+                            "full_line": line.strip(),
+                        }
+
+        network_info["host_network"]["interfaces"] = host_interfaces
+        print(f"Host network interfaces logged: {len(host_interfaces)} found")
+
+    except Exception as e:
+        network_info["host_network"]["error"] = str(e)
+        print(f"Could not get host MTU: {e}")
+
+    # Check container MTUs and routing
+    for container in ["alice", "bob"]:
+        try:
+            container_obj = orchestrator.docker_client.containers.get(container)
+
+            # Get interface info
+            result = container_obj.exec_run("ip link show")
+            if result.exit_code == 0:
+                container_interfaces = {}
+                for line in result.output.decode().split("\n"):
+                    if "mtu" in line.lower():
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            interface = parts[1].rstrip(":")
+                            mtu_idx = next(
+                                (i for i, part in enumerate(parts) if part == "mtu"),
+                                None,
+                            )
+                            if mtu_idx and mtu_idx + 1 < len(parts):
+                                mtu = parts[mtu_idx + 1]
+                                container_interfaces[interface] = {
+                                    "mtu": mtu,
+                                    "full_line": line.strip(),
+                                }
+
+                network_info["container_network"][container] = {
+                    "interfaces": container_interfaces
+                }
+
+            # Get routing table
+            result = container_obj.exec_run("ip route show")
+            if result.exit_code == 0:
+                network_info["container_network"][container][
+                    "routing"
+                ] = result.output.decode().strip()
+
+            # Get default route MTU if available
+            result = container_obj.exec_run("ip route get 8.8.8.8")
+            if result.exit_code == 0:
+                route_output = result.output.decode().strip()
+                network_info["container_network"][container][
+                    "default_route"
+                ] = route_output
+
+        except Exception as e:
+            network_info["container_network"][container] = {"error": str(e)}
+            print(f"Could not get {container} network info: {e}")
+
+    # Check Docker network MTU
+    try:
+        networks = orchestrator.docker_client.networks.list()
+        docker_networks = {}
+
+        for network in networks:
+            # Check if our containers are in this network
+            network_containers = (
+                [c.name for c in network.containers]
+                if hasattr(network, "containers")
+                else []
+            )
+            if "alice" in network_containers or "bob" in network_containers:
+                network_attrs = network.attrs
+                options = network_attrs.get("Options", {})
+
+                docker_networks[network.name] = {
+                    "id": network.id[:12],
+                    "driver": network_attrs.get("Driver", "unknown"),
+                    "mtu": options.get("com.docker.network.driver.mtu", "default"),
+                    "containers": network_containers,
+                    "ipam": network_attrs.get("IPAM", {}),
+                }
+
+        network_info["docker_network"] = docker_networks
+        print(f"Docker networks logged: {len(docker_networks)} relevant networks found")
+
+    except Exception as e:
+        network_info["docker_network"]["error"] = str(e)
+        print(f"Could not get Docker network info: {e}")
+
+    # Check strongSwan fragmentation settings (minimal)
+    try:
+        alice_container = orchestrator.docker_client.containers.get("alice")
+
+        # Get just the fragmentation-related settings
+        result = alice_container.exec_run(
+            "grep -E '(fragment_size|max_packet|send_vendor_id)' /etc/strongswan.conf"
+        )
+        if result.exit_code == 0:
+            fragmentation_lines = result.output.decode().strip().split("\n")
+            fragmentation_settings = {}
+
+            for line in fragmentation_lines:
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    fragmentation_settings[key.strip()] = value.strip()
+
+            network_info["fragmentation_settings"] = fragmentation_settings
+
+    except Exception as e:
+        network_info["fragmentation_settings"]["error"] = str(e)
+
+    # Write to files
+    try:
+        # JSON format
+        json_file = Path(output_dir) / "network_configuration.json"
+        with open(json_file, "w") as f:
+            json.dump(network_info, f, indent=2, sort_keys=True)
+
+        # Human readable format
+        txt_file = Path(output_dir) / "network_configuration.txt"
+        with open(txt_file, "w") as f:
+            f.write("=== Network Configuration Analysis ===\n")
+            f.write(f"Generated: {network_info['timestamp']}\n\n")
+
+            # Host network
+            f.write("[Host Network Interfaces]\n")
+            if "interfaces" in network_info["host_network"]:
+                for iface, info in network_info["host_network"]["interfaces"].items():
+                    f.write(f"  {iface}: MTU {info['mtu']}\n")
+            else:
+                f.write(
+                    f"  Error: {network_info['host_network'].get('error', 'No data')}\n"
+                )
+            f.write("\n")
+
+            # Container network
+            f.write("[Container Network Configuration]\n")
+            for container, info in network_info["container_network"].items():
+                f.write(f"  {container.upper()}:\n")
+                if "interfaces" in info:
+                    for iface, iface_info in info["interfaces"].items():
+                        f.write(f"    {iface}: MTU {iface_info['mtu']}\n")
+                if "routing" in info:
+                    f.write(f"    Routing: {info['routing'][:100]}...\n")
+                if "error" in info:
+                    f.write(f"    Error: {info['error']}\n")
+            f.write("\n")
+
+            # Docker network
+            f.write("[Docker Network Configuration]\n")
+            if "error" not in network_info["docker_network"]:
+                for net_name, net_info in network_info["docker_network"].items():
+                    f.write(f"  {net_name}:\n")
+                    f.write(f"    Driver: {net_info['driver']}\n")
+                    f.write(f"    MTU: {net_info['mtu']}\n")
+                    f.write(f"    Containers: {', '.join(net_info['containers'])}\n")
+            else:
+                f.write(f"  Error: {network_info['docker_network']['error']}\n")
+            f.write("\n")
+
+            # Fragmentation settings
+            f.write("[StrongSwan Fragmentation Settings]\n")
+            if "error" not in network_info["fragmentation_settings"]:
+                for key, value in network_info["fragmentation_settings"].items():
+                    f.write(f"  {key}: {value}\n")
+            else:
+                f.write(f"  Error: {network_info['fragmentation_settings']['error']}\n")
+
+        print(f"Network configuration logged to: {json_file}")
+
+    except Exception as e:
+        print(f"Warning: Could not write network configuration files: {e}")
+
+    return network_info
+
+
 def log_python_packages(orchestrator, output_dir):
     """Log all installed Python packages and their versions."""
     packages_info = {
