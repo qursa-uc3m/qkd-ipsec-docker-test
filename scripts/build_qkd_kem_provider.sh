@@ -12,6 +12,21 @@ else
     echo "Using ETSI API version: 004"
 fi
 
+# Set default QKD initiation mode if not specified
+if [ "$ETSI_API_VERSION" = "004" ]; then
+    # ETSI 004 always uses QKD_KEY_ID_CH=ON regardless of initiation mode
+    QKD_KEY_ID_CH="ON"
+    echo "QKD_KEY_ID_CH=ON (ETSI 004 always sends key ID in first message)"
+elif [ "$QKD_INITIATION_MODE" = "client" ]; then
+    # ETSI 014 with client-initiated mode
+    QKD_KEY_ID_CH="ON"
+    echo "QKD_KEY_ID_CH=ON (client-initiated: key ID sent in first message)"
+else
+    # ETSI 014 with server-initiated mode
+    QKD_KEY_ID_CH="OFF"
+    echo "QKD_KEY_ID_CH=OFF (server-initiated: key ID sent in response message)"
+fi
+
 # Create the OpenSSL modules directory if it doesn't exist
 mkdir -p /usr/local/lib/ossl-modules
 
@@ -46,9 +61,9 @@ export liboqs_DIR=/usr
 # Set provider build parameters
 # Add ETSI API version to the parameters
 if [ "$ETSI_API_VERSION" = "004" ]; then
-    export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=ON -DQKD_BACKEND=${QKD_BACKEND:-simulated} -DETSI_004_API=ON -DETSI_014_API=OFF"
+    export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=$QKD_KEY_ID_CH -DQKD_BACKEND=${QKD_BACKEND:-simulated} -DETSI_004_API=ON -DETSI_014_API=OFF"
 else
-    export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=ON -DQKD_BACKEND=${QKD_BACKEND:-simulated} -DETSI_014_API=ON -DETSI_004_API=OFF"
+    export OQSPROV_CMAKE_PARAMS="-DQKD_KEY_ID_CH=$QKD_KEY_ID_CH -DQKD_BACKEND=${QKD_BACKEND:-simulated} -DETSI_014_API=ON -DETSI_004_API=OFF"
 fi
 
 # Build the provider - but only clean the provider build, not liboqs
@@ -63,5 +78,12 @@ ldconfig
 # Set permissions
 chmod 755 /usr/local/lib/ossl-modules/qkdkemprovider.so
 
-echo "QKD KEM provider has been successfully built and installed with ETSI API version $ETSI_API_VERSION."
-echo "Backend mode: ${QKD_BACKEND:-simulated}"
+echo "=============================================="
+echo "QKD KEM provider build completed successfully"
+echo "=============================================="
+echo "Configuration:"
+echo "- ETSI API version: $ETSI_API_VERSION"
+echo "- QKD initiation mode: $QKD_INITIATION_MODE" 
+echo "- QKD_KEY_ID_CH: $QKD_KEY_ID_CH"
+echo "- Backend mode: ${QKD_BACKEND:-simulated}"
+echo "=============================================="

@@ -10,6 +10,7 @@ services:
         QKD_BACKEND: ${QKD_BACKEND:-simulated}
         ACCOUNT_ID: ${ACCOUNT_ID:-}
         ETSI_API_VERSION: ${ETSI_API_VERSION:-014}
+        QKD_INITIATION_MODE: ${QKD_INITIATION_MODE:-client}
         STRONGSWAN_VERSION: ${STRONGSWAN_VERSION:-6.0.0beta6}
     image: strongswan-base:latest
     container_name: strongswan-base

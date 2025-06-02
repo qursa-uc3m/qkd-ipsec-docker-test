@@ -10,7 +10,9 @@ services:
         BUILD_QKD_KEM: "true"
         QKD_BACKEND: ${QKD_BACKEND:-simulated}
         ACCOUNT_ID: ${ACCOUNT_ID:-}
-        ETSI_API_VERSION: ${ETSI_API_VERSION:-014}
+        ETSI_API_VERSION: ${ETSI_API_VERSION:-004}
+        QKD_INITIATION_MODE: ${QKD_INITIATION_MODE:-client}
+        STRONGSWAN_VERSION: ${STRONGSWAN_VERSION:-6.0.0beta6}
     image: strongswan-base:latest
     container_name: strongswan-base
     pull_policy: never
@@ -28,7 +30,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
     volumes:
       - ./bob:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -54,7 +56,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - ETSI_API_VERSION=${ETSI_API_VERSION:-014}
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
     volumes:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared

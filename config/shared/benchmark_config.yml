@@ -13,7 +13,8 @@ docker:
   qkd:
     etsi_api_version: "014"  # Options: "004", "014"
     backend: "qukaydee"  # Options: "simulated", "qukaydee", "cerberis-xgr", "python_client"
-    account_id: "2509"           # Required for QuKayDee only
+    account_id: "2509"  # Required for QuKayDee only
+    initiation_mode: "server"  # Options: "client", "server"
 
   # Docker Compose file to use
   compose_file: "docker-compose.yml"  # For ETSI 004, use: "docker-compose.004.yml"
@@ -26,18 +27,18 @@ docker:
 test:
   # Default network conditions
   network:
-    apply: true
+    apply: false
     latency: 100             # Milliseconds
     jitter: 0                # Milliseconds
     packet_loss: 5           # Percentage
     duration: "180m"          # Duration string
 
   # Test iterations
-  iterations: 15
+  iterations: 10
   
   # Analysis options
   analyze_results: true
-  log_scale: true            # Use logarithmic scale for charts
+  log_scale: false            # Use logarithmic scale for charts
 
 # Proposal configuration (This will be loaded from proposals_config.yml)
 # This section is just for documentation, actual proposals are loaded separately

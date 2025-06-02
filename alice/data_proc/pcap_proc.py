@@ -162,97 +162,122 @@ def get_total_pcap_bytes(pcap_file, log_message):
 
 
 def calculate_ike_handshake_latencies(packets, filename, log_message, iters=1):
-    """Calculate IKE handshake latency per iteration by summing all exchange latencies"""
+    """Calculate IKE handshake latency from first IKE_SA_INIT to last message before first IKE_AUTH per iteration"""
     if not packets:
         log_message("No packets for latency calculation")
         return []
 
-    # Convert packets to DataFrame for efficient processing
+    # Convert packets to DataFrame
     df_packets = pd.DataFrame(packets)
     df_packets = df_packets.sort_values("timestamp").reset_index(drop=True)
 
-    # Calculate individual exchange latencies
-    latency_data = []
+    # Find IKE_SA_INIT packets to identify iteration boundaries
+    ike_sa_init_packets = df_packets[df_packets["exchange_type"] == "ike_sa_init"]
 
-    # Group by exchange type and message_id to find request-response pairs
-    for (exchange_type, message_id), group in df_packets.groupby(
-        ["exchange_type", "message_id"]
-    ):
-        if len(group) < 2:
-            continue
-
-        group = group.sort_values("timestamp")
-
-        # Calculate latencies for request-response pairs
-        for i in range(0, len(group) - 1, 2):
-            if i + 1 < len(group):
-                req_row = group.iloc[i]
-                resp_row = group.iloc[i + 1]
-
-                latency = resp_row["timestamp"] - req_row["timestamp"]
-
-                latency_data.append(
-                    {
-                        "exchange_type": exchange_type,
-                        "pair_number": (i // 2) + 1,
-                        "latency_seconds": latency,
-                        "latency_ms": latency * 1000,
-                        "request_timestamp": req_row["timestamp"],
-                        "response_timestamp": resp_row["timestamp"],
-                        "message_id": message_id,
-                    }
-                )
-
-    if not latency_data:
-        log_message("No latency pairs found")
+    if len(ike_sa_init_packets) == 0:
+        log_message("Error: No IKE_SA_INIT packets found")
         return []
 
-    # Convert to DataFrame
-    df_latencies = pd.DataFrame(latency_data)
+    # Each iteration should have 2 IKE_SA_INIT packets (request + response)
+    expected_sa_init_count = iters * 2
+    actual_sa_init_count = len(ike_sa_init_packets)
 
-    # Calculate total IKE handshake latency per iteration
-    if iters > 1:
-        # Sort by request timestamp and group into iterations
-        df_latencies_sorted = df_latencies.sort_values("request_timestamp")
-        latencies_per_iter = len(df_latencies) // iters
+    if actual_sa_init_count != expected_sa_init_count:
+        log_message(
+            f"Warning: Expected {expected_sa_init_count} IKE_SA_INIT packets ({iters} iterations × 2), found {actual_sa_init_count}"
+        )
+        # Adjust iterations based on actual packets found
+        iters = actual_sa_init_count // 2
+        log_message(f"Adjusting to {iters} iterations based on packet count")
 
-        ike_handshake_latencies = []
+    if iters == 0:
+        log_message("Error: No complete iterations found")
+        return []
 
-        for iter_num in range(iters):
-            start_idx = iter_num * latencies_per_iter
-            end_idx = (iter_num + 1) * latencies_per_iter
+    # Group IKE_SA_INIT packets by pairs (request + response)
+    ike_sa_init_timestamps = ike_sa_init_packets["timestamp"].values
 
-            # Sum all latencies for this iteration
-            iter_latencies = df_latencies_sorted.iloc[start_idx:end_idx]
-            total_ike_latency = iter_latencies["latency_seconds"].sum()
-            ike_handshake_latencies.append(total_ike_latency)
+    ike_handshake_latencies = []
 
-            log_message(
-                f"Iteration {iter_num + 1}: IKE handshake latency = {total_ike_latency:.6f}s ({total_ike_latency*1000:.2f}ms)"
+    for iter_num in range(iters):
+        # Each iteration starts with the first IKE_SA_INIT packet of the pair
+        iter_start_time = ike_sa_init_timestamps[iter_num * 2]  # First packet of pair
+
+        # Define iteration boundary
+        if iter_num < iters - 1:
+            # Next iteration starts with the next IKE_SA_INIT pair
+            iter_end_boundary = ike_sa_init_timestamps[(iter_num + 1) * 2]
+            iter_mask = (df_packets["timestamp"] >= iter_start_time) & (
+                df_packets["timestamp"] < iter_end_boundary
             )
-    else:
-        # Single iteration - sum all latencies
-        ike_handshake_latencies = [df_latencies["latency_seconds"].sum()]
+        else:
+            # Last iteration - include all remaining packets
+            iter_mask = df_packets["timestamp"] >= iter_start_time
+
+        iter_packets = df_packets[iter_mask]
+
+        # Find first IKE_SA_INIT and first IKE_AUTH in this iteration
+        iter_ike_sa_init = iter_packets[iter_packets["exchange_type"] == "ike_sa_init"]
+        iter_ike_auth = iter_packets[iter_packets["exchange_type"] == "ike_auth"]
+
+        if len(iter_ike_sa_init) == 0:
+            log_message(f"Warning: Missing IKE_SA_INIT in iteration {iter_num + 1}")
+            ike_handshake_latencies.append(0.0)
+            continue
+
+        # Get first IKE_SA_INIT timestamp
+        first_ike_sa_init = iter_ike_sa_init["timestamp"].min()
+
+        # Find last message before first IKE_AUTH
+        if len(iter_ike_auth) > 0:
+            first_ike_auth = iter_ike_auth["timestamp"].min()
+            # Get all packets before first IKE_AUTH (including IKE_SA_INIT and IKE_INTERMEDIATE)
+            pre_auth_packets = iter_packets[iter_packets["timestamp"] < first_ike_auth]
+
+            if len(pre_auth_packets) > 0:
+                last_pre_auth_timestamp = pre_auth_packets["timestamp"].max()
+
+                # Show breakdown of included exchanges
+                pre_auth_exchanges = pre_auth_packets["exchange_type"].value_counts()
+                exchange_info = ", ".join(
+                    [f"{ex}: {count}" for ex, count in pre_auth_exchanges.items()]
+                )
+                log_message(f"  Included exchanges: {exchange_info}")
+            else:
+                log_message(
+                    f"Warning: No packets found before IKE_AUTH in iteration {iter_num + 1}"
+                )
+                last_pre_auth_timestamp = first_ike_sa_init
+        else:
+            # No IKE_AUTH found - use last packet in iteration (fallback)
+            log_message(
+                f"Warning: No IKE_AUTH found in iteration {iter_num + 1}, using last packet"
+            )
+            last_pre_auth_timestamp = iter_packets["timestamp"].max()
+
+        # Calculate handshake latency: first IKE_SA_INIT to last pre-auth message
+        handshake_latency = last_pre_auth_timestamp - first_ike_sa_init
+        ike_handshake_latencies.append(handshake_latency)
+
         log_message(
-            f"Single iteration: IKE handshake latency = {ike_handshake_latencies[0]:.6f}s ({ike_handshake_latencies[0]*1000:.2f}ms)"
+            f"Iteration {iter_num + 1}: {handshake_latency:.6f}s ({handshake_latency*1000:.2f}ms)"
+        )
+        log_message(f"  First IKE_SA_INIT: {first_ike_sa_init:.6f}")
+        log_message(f"  Last pre-AUTH message: {last_pre_auth_timestamp:.6f}")
+
+    # Save simple summary
+    summary_data = []
+    for i, latency in enumerate(ike_handshake_latencies):
+        summary_data.append(
+            {
+                "iteration": i + 1,
+                "handshake_latency_seconds": latency,
+                "handshake_latency_ms": latency * 1000,
+            }
         )
 
-    # Save detailed CSV file
-    df_latencies.to_csv(filename, index=False)
-    log_message(
-        f"Saved {len(df_latencies)} individual latency measurements to {filename}"
-    )
-
-    # Log summary by exchange type
-    summary = (
-        df_latencies.groupby("exchange_type")["latency_ms"]
-        .agg(["count", "mean"])
-        .reset_index()
-    )
-    for _, row in summary.iterrows():
-        log_message(
-            f"  {row['exchange_type']}: {int(row['count'])} pairs, avg {row['mean']:.2f}ms"
-        )
+    pd.DataFrame(summary_data).to_csv(filename, index=False)
+    log_message(f"Saved handshake summary to {filename}")
 
     return ike_handshake_latencies
 
@@ -391,7 +416,7 @@ def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
 
     # Calculate IKE handshake latencies per iteration
     ike_handshake_latencies = calculate_ike_handshake_latencies(
-        packets, f"{output_dir}/detailed_latencies_{prop}.csv", log_message, iters
+        packets, f"{output_dir}/handshake_summary_{prop}.csv", log_message, iters
     )
 
     # Update combined stats with latency data
@@ -478,22 +503,22 @@ def generate_pcap_report(
 
             f.write("\n" + "=" * 80 + "\n\n")
 
-            # Collect detailed latency data
-            detailed_file = f"{output_dir}/detailed_latencies_{prop}.csv"
+            # Collect latency summary data
+            summary_file = f"{output_dir}/handshake_summary_{prop}.csv"
             try:
-                if os.path.exists(detailed_file):
-                    detail_df = pd.read_csv(detailed_file)
-                    if not detail_df.empty:
-                        if "proposal" not in detail_df.columns:
-                            detail_df["proposal"] = prop
-                        all_latency_measurements.append(detail_df)
+                if os.path.exists(summary_file):
+                    summary_df = pd.read_csv(summary_file)
+                    if not summary_df.empty:
+                        if "proposal" not in summary_df.columns:
+                            summary_df["proposal"] = prop
+                        all_latency_measurements.append(summary_df)
                         log_message(
-                            f"Collected {len(detail_df)} detailed measurements for {prop}"
+                            f"Collected {len(summary_df)} handshake measurements for {prop}"
                         )
                 else:
-                    log_message(f"No detailed latencies file found for {prop}")
+                    log_message(f"No handshake summary file found for {prop}")
             except Exception as e:
-                log_message(f"Error reading detailed latencies for {prop}: {e}")
+                log_message(f"Error reading handshake summary for {prop}: {e}")
 
         # Overall summary
         if not df_bytes.empty:
@@ -531,10 +556,10 @@ def generate_pcap_report(
         aggregated_df.to_csv(aggregated_file, index=False)
         proposal_counts = aggregated_df["proposal"].value_counts()
         log_message(
-            f"Aggregated {len(aggregated_df)} latency measurements from {len(proposal_counts)} proposals"
+            f"Aggregated {len(aggregated_df)} handshake latency measurements from {len(proposal_counts)} proposals"
         )
         log_message(f"Aggregated measurements saved to: {aggregated_file}")
     else:
-        log_message("No detailed latency measurements found to aggregate")
+        log_message("No handshake latency measurements found to aggregate")
 
     log_message(f"Complete report generated: {output_dir}/report.txt")
