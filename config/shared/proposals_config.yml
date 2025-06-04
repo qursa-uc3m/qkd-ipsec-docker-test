@@ -8,6 +8,7 @@ proposals:
   - aes128-sha256-qkd       # Pure QKD
   - aes128-sha256-qkd_kyber1  # Hybrid QKD+PQC with qkd-kem provider
   - aes128-sha256-qkd-ke1_kyber1  # Sequential hybrid via IKE INTERMEDIATE (RFC 9370)
+  - aes128-sha256-kyber1-ke1_qkd  # Sequential hybrid via IKE INTERMEDIATE (RFC 9370) -reversed-
 
 # ESP (Encapsulating Security Payload) proposals
 # Using same as IKE proposals for consistency
@@ -19,3 +20,4 @@ esp_proposals:
   - aes128-sha256-qkd
   - aes128-sha256-qkd_kyber1
   - aes128-sha256-qkd-ke1_kyber1
+  - aes128-sha256-kyber1-ke1_qkd
