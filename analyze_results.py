@@ -864,7 +864,7 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
-    fig, ax = plt.subplots(figsize=(14, 9))
+    fig, ax = plt.subplots(figsize=(10, 9))
 
     # Set grid behind the data
     ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
@@ -929,15 +929,13 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
                     label_text,
                     ha="center",
                     va="bottom",
-                    fontsize=10,
+                    fontsize=12,
                     fontweight="bold",
-                    rotation=(
-                        90 if value > max(df_bytes["total_pcap_bytes"]) * 0.1 else 0
-                    ),
+                    rotation=(90),
                 )
 
     # Customize plot
-    ax.set_title("Bytes Transmitted by IKE Exchange Type and Proposal", pad=50)
+    ax.set_title("Bytes Transmitted by IKE Exchange Type and Proposal", pad=60)
 
     ax.set_ylabel("Bytes Transmitted")
     ax.set_xlabel("Proposal")
@@ -949,8 +947,8 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     # Position legend below the title but above the plot
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.08),
-        ncol=5,
+        bbox_to_anchor=(0.5, 1.15),
+        ncol=3,
         frameon=False,
     )
 
@@ -1404,7 +1402,7 @@ def plot_timing_comparison(
         linewidths=2,
         alpha=0.9,
         zorder=5,
-        label="Network Time",
+        label=r"Network Time ($t_{\mathrm{net}}$)",
     )
 
     # Overhead markers
@@ -1418,7 +1416,7 @@ def plot_timing_comparison(
         linewidths=2,
         alpha=0.9,
         zorder=5,
-        label="Processing Overhead",
+        label=r"Processing Overhead ($\Delta t_{\mathrm{overhead}}$)",
     )
 
     # Customize plot
@@ -1427,9 +1425,9 @@ def plot_timing_comparison(
         ylabel += " (log scale)"
 
     ax.set_title(
-        "Network Time vs Processing Overhead Comparison",
+        r"Comparison of Network Communication Time ($t_{\mathrm{net}}$) and Plugin Processing Additional Overhead ($\Delta t_{\mathrm{overhead}}$)",
         fontweight="bold",
-        fontsize=16,
+        fontsize=14,
         pad=20,
     )
     ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
