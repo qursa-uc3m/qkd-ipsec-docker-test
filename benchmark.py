@@ -934,10 +934,14 @@ class QKDTestOrchestrator:
 
         # Prepare file paths
         plugin_timing_file = f"{self.dirs['output_dir']}/plugin_timing_raw.csv"
+        plugin_timing_summary_file = (
+            f"{self.dirs['output_dir']}/plugin_timing_summary.csv"
+        )
         pcap_bytes_file = f"{self.dirs['output_dir']}/pcap_measurements.csv"
 
         # Check which files exist
         has_plugin_timing = os.path.exists(plugin_timing_file)
+        has_plugin_timing_summary = os.path.exists(plugin_timing_summary_file)
         has_pcap_bytes = os.path.exists(pcap_bytes_file)
 
         if not has_plugin_timing and not has_pcap_bytes:
@@ -953,6 +957,10 @@ class QKDTestOrchestrator:
         if has_plugin_timing:
             analysis_cmd.extend(["--plugin-timing", plugin_timing_file])
             print(f"  - Plugin timing analysis: {plugin_timing_file}")
+
+        if has_plugin_timing_summary:
+            analysis_cmd.extend(["--plugin-timing-summary", plugin_timing_summary_file])
+            print(f"  - Plugin timing summary analysis: {plugin_timing_summary_file}")
 
         # Add PCAP bytes analysis if file exists
         if has_pcap_bytes:

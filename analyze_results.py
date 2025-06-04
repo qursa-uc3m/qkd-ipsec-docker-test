@@ -1303,7 +1303,7 @@ def generate_raw_boxplot_data(df_combined, plugin_timing_df):
 def plot_timing_comparison(
     plugin_timing_df, df_combined, output_path, color_palette=None, log_scale=True
 ):
-    """Create scatter plot with error bars for plugin times and network times"""
+    """Create scatter plot showing processing overhead vs network time"""
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
@@ -1328,31 +1328,18 @@ def plot_timing_comparison(
     offset = 0.15
     x_positions = np.arange(n_proposals)
 
-    # Prepare data for scatter plot with error bars
-    plugin_means = []
-    plugin_stds = []
-    network_means = []
-    network_stds = []
-
-    for proposal in proposals:
-        # Calculate plugin statistics from individual measurements
-        plugin_data = plugin_timing_df[plugin_timing_df["proposal"] == proposal][
-            "total_plugin_time_ms"
-        ].values
-        plugin_means.append(np.mean(plugin_data))
-        plugin_stds.append(np.std(plugin_data))
-
-        # Get network statistics from combined data
-        net_row = df_combined[df_combined["proposal"] == proposal].iloc[0]
-        network_means.append(net_row["network_time_ms"])
-        network_stds.append(net_row["network_std_ms"])
+    # Get data directly from df_combined (already calculated)
+    network_means = df_combined["network_time_ms"].values
+    network_stds = df_combined["network_std_ms"].values
+    overhead_means = df_combined["overhead_ms"].values
+    overhead_stds = df_combined["overhead_std_ms"].values
 
     # Create colored shadow error bars first (behind)
-    # Plugin shadow error bars
+    # Network shadow error bars
     ax.errorbar(
         x_positions - offset,
-        plugin_means,
-        yerr=plugin_stds,
+        network_means,
+        yerr=network_stds,
         fmt="none",
         color=color_palette[2],
         linewidth=4,
@@ -1362,11 +1349,11 @@ def plot_timing_comparison(
         zorder=1,
     )
 
-    # Network shadow error bars
+    # Overhead shadow error bars
     ax.errorbar(
         x_positions + offset,
-        network_means,
-        yerr=network_stds,
+        overhead_means,
+        yerr=overhead_stds,
         fmt="none",
         color=color_palette[6],
         linewidth=4,
@@ -1377,23 +1364,9 @@ def plot_timing_comparison(
     )
 
     # Create black error bars on top
-    # Plugin black error bars
-    ax.errorbar(
-        x_positions - offset,
-        plugin_means,
-        yerr=plugin_stds,
-        fmt="none",
-        color="black",
-        linewidth=1,
-        capsize=8,
-        capthick=1,
-        alpha=0.8,
-        zorder=3,
-    )
-
     # Network black error bars
     ax.errorbar(
-        x_positions + offset,
+        x_positions - offset,
         network_means,
         yerr=network_stds,
         fmt="none",
@@ -1405,11 +1378,25 @@ def plot_timing_comparison(
         zorder=3,
     )
 
+    # Overhead black error bars
+    ax.errorbar(
+        x_positions + offset,
+        overhead_means,
+        yerr=overhead_stds,
+        fmt="none",
+        color="black",
+        linewidth=1,
+        capsize=8,
+        capthick=1,
+        alpha=0.8,
+        zorder=3,
+    )
+
     # Create markers with black borders on top
-    # Plugin markers
+    # Network markers
     ax.scatter(
         x_positions - offset,
-        plugin_means,
+        network_means,
         s=25,
         color=color_palette[2],
         marker="o",
@@ -1417,13 +1404,13 @@ def plot_timing_comparison(
         linewidths=2,
         alpha=0.9,
         zorder=5,
-        label="Plugin Time",
+        label="Network Time",
     )
 
-    # Network markers
+    # Overhead markers
     ax.scatter(
         x_positions + offset,
-        network_means,
+        overhead_means,
         s=25,
         color=color_palette[6],
         marker="s",
@@ -1431,7 +1418,7 @@ def plot_timing_comparison(
         linewidths=2,
         alpha=0.9,
         zorder=5,
-        label="Network Time",
+        label="Processing Overhead",
     )
 
     # Customize plot
@@ -1440,7 +1427,7 @@ def plot_timing_comparison(
         ylabel += " (log scale)"
 
     ax.set_title(
-        "Plugin Time Overhead vs Network Time Comparison",
+        "Network Time vs Processing Overhead Comparison",
         fontweight="bold",
         fontsize=16,
         pad=20,
@@ -1460,7 +1447,7 @@ def plot_timing_comparison(
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 
-    print(f"Created timing scatter comparison: {output_path}")
+    print(f"Created network vs overhead comparison: {output_path}")
 
 
 def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
@@ -1489,6 +1476,190 @@ def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
     )
 
     return True
+
+
+def detect_retransmissions_from_combined_data(df_plugin_stats, df_pcap):
+    """
+    Detect retransmissions by comparing expected vs actual message counts
+
+    Args:
+        df_plugin_stats: DataFrame with plugin timing summary (contains total_algorithms)
+        df_pcap: DataFrame with PCAP measurements (contains IKE message counts)
+
+    Returns:
+        DataFrame with retransmission analysis
+    """
+    # Merge the dataframes on proposal
+    df_merged = pd.merge(df_plugin_stats, df_pcap, on="proposal", how="inner")
+
+    retransmission_data = []
+
+    for _, row in df_merged.iterrows():
+        proposal = row["proposal"]
+        total_algorithms = row["total_algorithms"]
+
+        # Calculate expected message counts based on total_algorithms
+        if total_algorithms == 1:
+            # Simple proposal: 2 IKE_SA_INIT + 0 IKE_INTERMEDIATE = 2 total
+            expected_ike_sa_init = 2
+            expected_ike_intermediate = 0
+            expected_total_key_exchange = 2
+        elif total_algorithms == 2:
+            # Hybrid proposal: 2 IKE_SA_INIT + 2 IKE_INTERMEDIATE = 4 total
+            expected_ike_sa_init = 2
+            expected_ike_intermediate = 2
+            expected_total_key_exchange = 4
+        else:
+            # For more complex cases, we might need to adjust this logic
+            expected_ike_sa_init = 2
+            expected_ike_intermediate = (total_algorithms - 1) * 2
+            expected_total_key_exchange = 2 + expected_ike_intermediate
+
+        # Get actual counts from PCAP
+        actual_ike_sa_init = row["ike_sa_init_count"]
+        actual_ike_intermediate = row["ike_intermediate_count"]
+        actual_total_key_exchange = actual_ike_sa_init + actual_ike_intermediate
+
+        # Calculate excess messages (retransmissions)
+        ike_sa_init_excess = max(0, actual_ike_sa_init - expected_ike_sa_init)
+        ike_intermediate_excess = max(
+            0, actual_ike_intermediate - expected_ike_intermediate
+        )
+        total_excess = ike_sa_init_excess + ike_intermediate_excess
+
+        # Determine if retransmissions occurred
+        has_retransmissions = total_excess > 0
+
+        retransmission_data.append(
+            {
+                "proposal": proposal,
+                "total_algorithms": total_algorithms,
+                "expected_ike_sa_init": expected_ike_sa_init,
+                "actual_ike_sa_init": actual_ike_sa_init,
+                "ike_sa_init_excess": ike_sa_init_excess,
+                "expected_ike_intermediate": expected_ike_intermediate,
+                "actual_ike_intermediate": actual_ike_intermediate,
+                "ike_intermediate_excess": ike_intermediate_excess,
+                "expected_total_key_exchange": expected_total_key_exchange,
+                "actual_total_key_exchange": actual_total_key_exchange,
+                "total_excess_messages": total_excess,
+                "has_retransmissions": has_retransmissions,
+                "clean_transmission": not has_retransmissions,
+                "retransmission_rate": (
+                    (total_excess / expected_total_key_exchange * 100)
+                    if expected_total_key_exchange > 0
+                    else 0
+                ),
+            }
+        )
+
+    return pd.DataFrame(retransmission_data)
+
+
+def analyze_retransmissions_combined(
+    plugin_summary_csv, pcap_csv, output_dir="analysis"
+):
+    """
+    Analyze retransmissions using both plugin timing summary and PCAP data
+
+    Args:
+        plugin_summary_csv: Path to plugin_timing_summary.csv
+        pcap_csv: Path to pcap_measurements.csv
+        output_dir: Output directory
+    """
+    color_palette = setup_matplotlib_styling()
+    os.makedirs(output_dir, exist_ok=True)
+
+    try:
+        # Load both datasets
+        print(f"Loading plugin timing summary from {plugin_summary_csv}...")
+        df_plugin = pd.read_csv(plugin_summary_csv)
+
+        print(f"Loading PCAP measurements from {pcap_csv}...")
+        df_pcap = pd.read_csv(pcap_csv)
+
+        # Detect retransmissions
+        print("Analyzing retransmissions...")
+        df_retrans = detect_retransmissions_from_combined_data(df_plugin, df_pcap)
+
+        # Save detailed retransmission analysis
+        retrans_csv = f"{output_dir}/retransmission_analysis.csv"
+        df_retrans.to_csv(retrans_csv, index=False)
+        print(f"Saved retransmission analysis to {retrans_csv}")
+
+        # Generate text summary
+        clean_proposals = df_retrans[df_retrans["clean_transmission"]][
+            "proposal"
+        ].tolist()
+        retrans_proposals = df_retrans[df_retrans["has_retransmissions"]][
+            "proposal"
+        ].tolist()
+
+        # Save summary table
+        summary_path = f"{output_dir}/retransmission_summary.txt"
+        with open(summary_path, "w") as f:
+            f.write("RETRANSMISSION ANALYSIS SUMMARY\n")
+            f.write("=" * 50 + "\n\n")
+
+            f.write(f"Total proposals analyzed: {len(df_retrans)}\n")
+            f.write(f"Clean transmissions: {len(clean_proposals)}\n")
+            f.write(f"With retransmissions: {len(retrans_proposals)}\n\n")
+
+            if clean_proposals:
+                f.write("CLEAN TRANSMISSION PROPOSALS:\n")
+                f.write("-" * 30 + "\n")
+                for proposal in clean_proposals:
+                    row = df_retrans[df_retrans["proposal"] == proposal].iloc[0]
+                    f.write(
+                        f"✓ {proposal} ({row['total_algorithms']} algorithms, "
+                        f"{row['actual_total_key_exchange']} messages)\n"
+                    )
+                f.write("\n")
+
+            if retrans_proposals:
+                f.write("PROPOSALS WITH RETRANSMISSIONS:\n")
+                f.write("-" * 35 + "\n")
+                for proposal in retrans_proposals:
+                    row = df_retrans[df_retrans["proposal"] == proposal].iloc[0]
+                    f.write(f"🔄 {proposal}:\n")
+                    f.write(
+                        f"   Expected: {row['expected_total_key_exchange']} messages\n"
+                    )
+                    f.write(f"   Actual: {row['actual_total_key_exchange']} messages\n")
+                    f.write(
+                        f"   Excess: {row['total_excess_messages']} messages "
+                        f"({row['retransmission_rate']:.1f}% increase)\n"
+                    )
+                    if row["ike_sa_init_excess"] > 0:
+                        f.write(f"   - IKE_SA_INIT: +{row['ike_sa_init_excess']}\n")
+                    if row["ike_intermediate_excess"] > 0:
+                        f.write(
+                            f"   - IKE_INTERMEDIATE: +{row['ike_intermediate_excess']}\n"
+                        )
+                    f.write("\n")
+
+        print(f"Generated summary report: {summary_path}")
+
+        # Console output
+        print("\nRETRANSMISSION ANALYSIS RESULTS:")
+        print("=" * 50)
+        print(f"Clean transmissions: {len(clean_proposals)}/{len(df_retrans)}")
+        print(f"With retransmissions: {len(retrans_proposals)}/{len(df_retrans)}")
+
+        if retrans_proposals:
+            print("\nProposals with retransmissions:")
+            for proposal in retrans_proposals:
+                row = df_retrans[df_retrans["proposal"] == proposal].iloc[0]
+                print(f"  🔄 {proposal}: +{row['total_excess_messages']} messages")
+
+        if clean_proposals:
+            print(f"\nClean proposals: {', '.join(clean_proposals)}")
+
+        return True
+
+    except Exception as e:
+        print(f"Error in retransmission analysis: {e}")
+        return False
 
 
 def parse_arguments():
@@ -1523,6 +1694,12 @@ Examples:
         "--plugin-timing",
         metavar="CSV_FILE",
         help="Path to plugin timing raw CSV file (plugin_timing_raw.csv)",
+    )
+
+    parser.add_argument(
+        "--plugin-timing-summary",
+        metavar="CSV_FILE",
+        help="Path to plugin timing summary raw CSV file (plugin_timing_summary.csv)",
     )
 
     parser.add_argument(
@@ -1570,12 +1747,14 @@ def main():
     # Validate that at least one analysis is requested
     if not (
         args.plugin_timing
+        or args.plugin_timing_summary
         or args.pcap_bytes
         or args.network_compare
         or args.compare_bytes
     ):
         print("Error: Please specify at least one analysis type:")
         print("  --plugin-timing <file>       for plugin timing analysis")
+        print("  --plugin-timing-summary <file> for plugin timing summary analysis")
         print("  --pcap-bytes <file>          for PCAP bytes analysis")
         print("  --network-compare <dirs>     for network comparison")
         print("  --compare-bytes <baseline> <comparison> for file comparison")
@@ -1624,6 +1803,14 @@ def main():
                 args.plugin_timing, args.pcap_bytes, args.output
             )
             success = success and combined_success
+
+        # Retransmission analysis
+        if args.plugin_timing_summary and args.pcap_bytes:
+            print("Running retransmission analysis...")
+            retrans_success = analyze_retransmissions_combined(
+                args.plugin_timing_summary, args.pcap_bytes, args.output
+            )
+            success = success and retrans_success
 
     if success:
         print(f"\n✓ Analysis completed successfully! Results saved to: {args.output}/")
