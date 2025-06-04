@@ -1,0 +1,159 @@
+# Cryptographic proposals to test
+# Format: encryption-integrity-keyexchange
+proposals:
+  # Traditional elliptic curve
+  - aes128-sha256-ecp256
+  
+  # Modern elliptic curve
+  - aes128-sha256-x25519
+  
+  # Post-quantum KEM variants
+  - aes128-sha256-kyber1
+  - aes128-sha256-kyber3
+  - aes128-sha256-kyber5
+  - aes128-sha256-frodoa1
+  - aes128-sha256-frodoa3
+  - aes128-sha256-frodoa5
+  - aes128-sha256-frodos1
+  - aes128-sha256-frodos3
+  - aes128-sha256-frodos5
+  - aes128-sha256-bike1
+  - aes128-sha256-bike3
+  - aes128-sha256-bike5
+  - aes128-sha256-hqc1
+  - aes128-sha256-hqc3
+  - aes128-sha256-hqc5
+  
+  # Traditional + Post-quantum hybrids
+  - aes128-sha256-x25519-ke1_kyber1
+  - aes128-sha256-x25519-ke1_kyber3
+  - aes128-sha256-x25519-ke1_kyber5
+  - aes128-sha256-x25519-ke1_frodoa1
+  - aes128-sha256-x25519-ke1_frodoa3
+  - aes128-sha256-x25519-ke1_frodoa5
+  - aes128-sha256-x25519-ke1_frodos1
+  - aes128-sha256-x25519-ke1_frodos3
+  - aes128-sha256-x25519-ke1_frodos5
+  - aes128-sha256-x25519-ke1_bike1
+  - aes128-sha256-x25519-ke1_bike3
+  - aes128-sha256-x25519-ke1_bike5
+  - aes128-sha256-x25519-ke1_hqc1
+  - aes128-sha256-x25519-ke1_hqc3
+  - aes128-sha256-x25519-ke1_hqc5
+  
+  # Pure QKD
+  - aes128-sha256-qkd
+  
+  # QKD + Post-quantum hybrids (single KEM approach)
+  - aes128-sha256-qkd_kyber1
+  - aes128-sha256-qkd_kyber3
+  - aes128-sha256-qkd_kyber5
+  - aes128-sha256-qkd_frodoa1
+  - aes128-sha256-qkd_frodoa3
+  - aes128-sha256-qkd_frodoa5
+  - aes128-sha256-qkd_frodos1
+  - aes128-sha256-qkd_frodos3
+  - aes128-sha256-qkd_frodos5
+  - aes128-sha256-qkd_bike1
+  - aes128-sha256-qkd_bike3
+  - aes128-sha256-qkd_bike5
+  - aes128-sha256-qkd_hqc1
+  - aes128-sha256-qkd_hqc3
+  - aes128-sha256-qkd_hqc5
+  
+  # Sequential QKD + Post-quantum hybrids (RFC 9370 - reversed order only)
+  - aes128-sha256-kyber1-ke1_qkd
+  - aes128-sha256-kyber3-ke1_qkd
+  - aes128-sha256-kyber5-ke1_qkd
+  - aes128-sha256-frodoa1-ke1_qkd
+  - aes128-sha256-frodoa3-ke1_qkd
+  - aes128-sha256-frodoa5-ke1_qkd
+  - aes128-sha256-frodos1-ke1_qkd
+  - aes128-sha256-frodos3-ke1_qkd
+  - aes128-sha256-frodos5-ke1_qkd
+  - aes128-sha256-bike1-ke1_qkd
+  - aes128-sha256-bike3-ke1_qkd
+  - aes128-sha256-bike5-ke1_qkd
+  - aes128-sha256-hqc1-ke1_qkd
+  - aes128-sha256-hqc3-ke1_qkd
+  - aes128-sha256-hqc5-ke1_qkd
+
+# ESP (Encapsulating Security Payload) proposals
+# Using same as IKE proposals for consistency
+esp_proposals:
+  # Traditional elliptic curve
+  - aes128-sha256-ecp256
+  
+  # Modern elliptic curve
+  - aes128-sha256-x25519
+  
+  # Post-quantum KEM variants
+  - aes128-sha256-kyber1
+  - aes128-sha256-kyber3
+  - aes128-sha256-kyber5
+  - aes128-sha256-frodoa1
+  - aes128-sha256-frodoa3
+  - aes128-sha256-frodoa5
+  - aes128-sha256-frodos1
+  - aes128-sha256-frodos3
+  - aes128-sha256-frodos5
+  - aes128-sha256-bike1
+  - aes128-sha256-bike3
+  - aes128-sha256-bike5
+  - aes128-sha256-hqc1
+  - aes128-sha256-hqc3
+  - aes128-sha256-hqc5
+  
+  # Traditional + Post-quantum hybrids
+  - aes128-sha256-x25519-ke1_kyber1
+  - aes128-sha256-x25519-ke1_kyber3
+  - aes128-sha256-x25519-ke1_kyber5
+  - aes128-sha256-x25519-ke1_frodoa1
+  - aes128-sha256-x25519-ke1_frodoa3
+  - aes128-sha256-x25519-ke1_frodoa5
+  - aes128-sha256-x25519-ke1_frodos1
+  - aes128-sha256-x25519-ke1_frodos3
+  - aes128-sha256-x25519-ke1_frodos5
+  - aes128-sha256-x25519-ke1_bike1
+  - aes128-sha256-x25519-ke1_bike3
+  - aes128-sha256-x25519-ke1_bike5
+  - aes128-sha256-x25519-ke1_hqc1
+  - aes128-sha256-x25519-ke1_hqc3
+  - aes128-sha256-x25519-ke1_hqc5
+  
+  # Pure QKD
+  - aes128-sha256-qkd
+  
+  # QKD + Post-quantum hybrids (single KEM approach)
+  - aes128-sha256-qkd_kyber1
+  - aes128-sha256-qkd_kyber3
+  - aes128-sha256-qkd_kyber5
+  - aes128-sha256-qkd_frodoa1
+  - aes128-sha256-qkd_frodoa3
+  - aes128-sha256-qkd_frodoa5
+  - aes128-sha256-qkd_frodos1
+  - aes128-sha256-qkd_frodos3
+  - aes128-sha256-qkd_frodos5
+  - aes128-sha256-qkd_bike1
+  - aes128-sha256-qkd_bike3
+  - aes128-sha256-qkd_bike5
+  - aes128-sha256-qkd_hqc1
+  - aes128-sha256-qkd_hqc3
+  - aes128-sha256-qkd_hqc5
+  
+  # Sequential QKD + Post-quantum hybrids (RFC 9370 - reversed order only)
+  - aes128-sha256-kyber1-ke1_qkd
+  - aes128-sha256-kyber3-ke1_qkd
+  - aes128-sha256-kyber5-ke1_qkd
+  - aes128-sha256-frodoa1-ke1_qkd
+  - aes128-sha256-frodoa3-ke1_qkd
+  - aes128-sha256-frodoa5-ke1_qkd
+  - aes128-sha256-frodos1-ke1_qkd
+  - aes128-sha256-frodos3-ke1_qkd
+  - aes128-sha256-frodos5-ke1_qkd
+  - aes128-sha256-bike1-ke1_qkd
+  - aes128-sha256-bike3-ke1_qkd
+  - aes128-sha256-bike5-ke1_qkd
+  - aes128-sha256-hqc1-ke1_qkd
+  - aes128-sha256-hqc3-ke1_qkd
+  - aes128-sha256-hqc5-ke1_qkd
