@@ -138,6 +138,10 @@ class QKDTestOrchestrator:
             print("CLI --build flag provided, overriding YAML build setting")
             self.build = True
 
+        if hasattr(args, "no_cache") and args.no_cache:
+            print("CLI --no-cache flag provided, overriding YAML use_cache setting")
+            self.use_cache = False
+
         # ETSI version and backend overrides (if provided)
         if args.etsi_version is not None:
             self.config["docker"]["qkd"]["etsi_api_version"] = args.etsi_version
@@ -405,9 +409,7 @@ class QKDTestOrchestrator:
 
             print("Containers not running after docker-compose up. Trying to build...")
             # Try building and starting containers
-            build_success = self.setup_environment(
-                build_only=False, detached=True, no_cache=not self.use_cache
-            )
+            build_success = self.setup_environment(build_only=False, detached=True)
             if not build_success:
                 raise Exception("Both container start and build attempts failed")
 
@@ -419,9 +421,7 @@ class QKDTestOrchestrator:
             print("Now trying to build and start containers...")
 
             # Try building and starting containers
-            build_success = self.setup_environment(
-                build_only=False, detached=True, no_cache=not self.use_cache
-            )
+            build_success = self.setup_environment(build_only=False, detached=True)
             if not build_success:
                 raise Exception("Both container start and build attempts failed")
 
@@ -460,7 +460,7 @@ class QKDTestOrchestrator:
             ).lower(),
         }
 
-    def setup_environment(self, build_only=False, detached=True, no_cache=False):
+    def setup_environment(self, build_only=False, detached=True):
         """Build and start Docker containers."""
         compose_file = self.config["docker"]["compose_file"]
 
@@ -474,7 +474,7 @@ class QKDTestOrchestrator:
         self._display_build_config()
 
         # Build containers
-        if not self._build_containers(compose_file, env, no_cache):
+        if not self._build_containers(compose_file, env):
             return False
 
         # Start containers if not build-only
@@ -525,11 +525,11 @@ class QKDTestOrchestrator:
         print(f"  - Bob IP: {self.bob_ip}")
         print("")
 
-    def _build_containers(self, compose_file, env, no_cache):
+    def _build_containers(self, compose_file, env):
         """Build Docker containers."""
         print("Building containers...")
         build_cmd = ["docker-compose", "-f", compose_file, "build"]
-        if no_cache:
+        if not self.use_cache:
             build_cmd.append("--no-cache")
 
         try:
@@ -1003,7 +1003,7 @@ class QKDTestOrchestrator:
             else:
                 print("Please enter 'y' or 'n'.")
 
-    def execute_workflow(self, no_cache=False):
+    def execute_workflow(self):
         """Execute the complete testing workflow with proper cleanup."""
         try:
             # Clean up any existing Pumba containers first
@@ -1012,7 +1012,8 @@ class QKDTestOrchestrator:
             if self.build:
                 print("Rebuild requested - building containers from scratch")
                 if not self.setup_environment(
-                    build_only=False, detached=True, no_cache=no_cache
+                    build_only=False,
+                    detached=True,
                 ):
                     print("Container preparation failed. Exiting.")
                     return 1
@@ -1141,4 +1142,4 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     orchestrator = QKDTestOrchestrator(config_file=args.config, cli_args=args)
-    sys.exit(orchestrator.execute_workflow(no_cache=args.no_cache))
+    sys.exit(orchestrator.execute_workflow())
