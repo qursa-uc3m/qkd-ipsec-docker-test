@@ -15,15 +15,15 @@ def setup_matplotlib_styling():
 
     # Match the font settings from your reference
     rcParams["font.family"] = "Ubuntu"  # Or use 'Liberation Sans' as alternative
-    rcParams["font.size"] = 11
-    rcParams["axes.titlesize"] = 16
-    rcParams["axes.labelsize"] = 12
+    rcParams["font.size"] = 12
+    rcParams["axes.titlesize"] = 18
+    rcParams["axes.labelsize"] = 16
     rcParams["axes.titleweight"] = "bold"
     rcParams["axes.labelweight"] = "bold"
-    rcParams["xtick.labelsize"] = 11
-    rcParams["ytick.labelsize"] = 11
-    rcParams["legend.fontsize"] = 11
-    rcParams["figure.titlesize"] = 16
+    rcParams["xtick.labelsize"] = 14
+    rcParams["ytick.labelsize"] = 14
+    rcParams["legend.fontsize"] = 14
+    rcParams["figure.titlesize"] = 18
     rcParams["figure.figsize"] = (11, 6)
     rcParams["savefig.dpi"] = 300
     rcParams["savefig.bbox"] = "tight"
@@ -850,12 +850,6 @@ def analyze_plugin_timing(raw_csv_file, output_dir="analysis", log_scale=False):
 
     return True
 
-
-import argparse
-import sys
-import os
-
-
 def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     """
     Create a grouped bar chart showing bytes transmitted for different IKE exchange types per proposal
@@ -868,7 +862,7 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(14, 9))
 
     # Set grid behind the data
     ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
@@ -925,7 +919,6 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
         for bar, value in zip(bars, byte_values):
             if value > 0:  # Only show labels for non-zero values
                 height = bar.get_height()
-                # Format bytes with commas for readability
                 label_text = f"{int(value):,}" if value >= 1000 else f"{int(value)}"
 
                 ax.text(
@@ -934,7 +927,7 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
                     label_text,
                     ha="center",
                     va="bottom",
-                    fontsize=9,
+                    fontsize=10,
                     fontweight="bold",
                     rotation=(
                         90 if value > max(df_bytes["total_pcap_bytes"]) * 0.1 else 0
@@ -944,26 +937,33 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     # Customize plot
     ax.set_title(
         "Bytes Transmitted by IKE Exchange Type and Proposal",
-        fontweight="bold",
-        fontsize=16,
-        pad=20,
+        pad=50
     )
-    ax.set_ylabel("Bytes Transmitted", fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+        
+    ax.set_ylabel("Bytes Transmitted")
+    ax.set_xlabel("Proposal")
 
     # Set x-axis
     ax.set_xticks(x)
-    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
-    ax.tick_params(axis="y", labelsize=11)
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
+        
+    # Position legend below the title but above the plot
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.08),
+        ncol=5,
+        frameon=False,
+    )
 
-    # Add legend
-    ax.legend(loc="upper right", fontsize=11, framealpha=0.9)
+    # Set y-axis limits to prevent data label overflow
+    max_value = max(df_bytes["total_pcap_bytes"])
+    ax.set_ylim(0, max_value * 1.15)  # Add 15% padding at the top
 
     # Format y-axis to show values with commas
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path)
     plt.close()
 
     print(f"Created bytes transmission plot: {output_path}")
