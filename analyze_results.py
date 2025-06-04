@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import matplotlib.colors as mcolors
+from matplotlib.patches import Patch
 
 
 # Configure matplotlib styling - matching your reference style
@@ -850,6 +851,7 @@ def analyze_plugin_timing(raw_csv_file, output_dir="analysis", log_scale=False):
 
     return True
 
+
 def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
     """
     Create a grouped bar chart showing bytes transmitted for different IKE exchange types per proposal
@@ -935,18 +937,15 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
                 )
 
     # Customize plot
-    ax.set_title(
-        "Bytes Transmitted by IKE Exchange Type and Proposal",
-        pad=50
-    )
-        
+    ax.set_title("Bytes Transmitted by IKE Exchange Type and Proposal", pad=50)
+
     ax.set_ylabel("Bytes Transmitted")
     ax.set_xlabel("Proposal")
 
     # Set x-axis
     ax.set_xticks(x)
     ax.set_xticklabels(proposals, rotation=45, ha="right")
-        
+
     # Position legend below the title but above the plot
     ax.legend(
         loc="upper center",
@@ -1213,19 +1212,19 @@ def plot_bytes_increase_comparison(comparison_df, output_path, color_palette=Non
 
 
 def load_and_compute_combined_timing(plugin_raw_csv, pcap_csv):
-    """Load raw plugin data and PCAP data, compute statistics on the fly"""
+    """Load raw plugin data and PCAP data, compute averages for proper comparison"""
     try:
-        # Load and process raw plugin timing data (same as existing function)
+        # Load and process raw plugin timing data
         df_plugin_raw = load_raw_timing_data(plugin_raw_csv)
         if df_plugin_raw is None:
             return None
 
         df_pcap = pd.read_csv(pcap_csv)
 
-        # Calculate timing metrics from raw plugin data (same logic as plugin timing analysis)
+        # Calculate timing metrics from raw plugin data
         plugin_timing_df = calculate_timing_metrics(df_plugin_raw)
 
-        # Aggregate plugin statistics by proposal (same as existing)
+        # Aggregate plugin statistics by proposal (get averages)
         plugin_stats = aggregate_timing_statistics(plugin_timing_df)
 
         # Merge with PCAP data
@@ -1233,29 +1232,22 @@ def load_and_compute_combined_timing(plugin_raw_csv, pcap_csv):
         if len(df_combined) == 0:
             raise ValueError("No common proposals found")
 
-        # Convert and calculate timing metrics
+        # Convert network time from seconds to milliseconds
         df_combined["network_time_ms"] = df_combined["ike_latency_avg"] * 1000
         df_combined["network_std_ms"] = df_combined["ike_latency_std"] * 1000
-        df_combined["plugin_time_ms"] = df_combined[
-            "avg_total_plugin_time_ms"
-        ]  # From aggregated stats
-        df_combined["plugin_std_ms"] = df_combined[
-            "std_total_plugin_time_ms"
-        ]  # From aggregated stats
 
-        # Processing overhead = plugin time - network time
+        # Plugin time is already in milliseconds from aggregation
+        df_combined["plugin_time_ms"] = df_combined["avg_total_plugin_time_ms"]
+        df_combined["plugin_std_ms"] = df_combined["std_total_plugin_time_ms"]
+
+        # Processing overhead = average plugin time - average network time
         df_combined["overhead_ms"] = (
             df_combined["plugin_time_ms"] - df_combined["network_time_ms"]
         )
+
+        # Error propagation for overhead standard deviation
         df_combined["overhead_std_ms"] = np.sqrt(
             df_combined["plugin_std_ms"] ** 2 + df_combined["network_std_ms"] ** 2
-        )
-
-        # Store raw individual measurements for boxplots
-        df_combined["raw_plugin_data"] = df_combined["proposal"].apply(
-            lambda prop: plugin_timing_df[plugin_timing_df["proposal"] == prop][
-                "total_plugin_time_ms"
-            ].values
         )
 
         return df_combined, plugin_timing_df
@@ -1308,82 +1300,175 @@ def generate_raw_boxplot_data(df_combined, plugin_timing_df):
     return pd.DataFrame(data)
 
 
-def plot_raw_timing_comparison(
-    df_combined, plugin_timing_df, output_path, color_palette=None
+def plot_timing_comparison(
+    plugin_timing_df, df_combined, output_path, color_palette=None, log_scale=True
 ):
-    """Create side-by-side boxplots using raw individual measurements"""
+    """Create scatter plot with error bars for plugin times and network times"""
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
-    # Generate raw data for boxplots
-    df_plot = generate_raw_boxplot_data(df_combined, plugin_timing_df)
+    fig, ax = plt.subplots(figsize=(10, 8))
 
-    fig, ax = plt.subplots(figsize=(14, 8))
-    # REMOVED: ax.set_yscale("log") - this was causing the issues
-    ax.grid(True, linestyle="--", alpha=0.4)
+    # Set logarithmic scale by default
+    if log_scale:
+        ax.set_yscale("log")
+        # Sparse grid for log scale - only major ticks
+        ax.grid(True, linestyle="--", which="major", color="grey", alpha=0.6)
+        ax.grid(True, linestyle=":", which="minor", color="grey", alpha=0.2)
+    else:
+        # Regular grid for linear scale
+        ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+
     ax.set_axisbelow(True)
 
     proposals = df_combined["proposal"].tolist()
-    colors = [color_palette[2], color_palette[6]]  # Blue, Orange
+    n_proposals = len(proposals)
 
-    for i, proposal in enumerate(proposals):
-        prop_data = df_plot[df_plot["proposal"] == proposal]
+    # Set up positions for side-by-side scatter points
+    offset = 0.15
+    x_positions = np.arange(n_proposals)
 
-        for j, timing_type in enumerate(["Network", "Overhead"]):
-            data = prop_data[prop_data["type"] == timing_type]["time_ms"].values
-            pos = i + (j - 0.5) * 0.35
+    # Prepare data for scatter plot with error bars
+    plugin_means = []
+    plugin_stds = []
+    network_means = []
+    network_stds = []
 
-            # Boxplot
-            ax.boxplot(
-                [data],
-                positions=[pos],
-                widths=0.25,
-                patch_artist=True,
-                showfliers=False,
-                boxprops=dict(facecolor="white", alpha=0.3, linewidth=1.2),
-                whiskerprops=dict(linewidth=1.2),
-                capprops=dict(linewidth=1.2),
-                medianprops=dict(linewidth=1.5, color="darkblue"),
-            )
+    for proposal in proposals:
+        # Calculate plugin statistics from individual measurements
+        plugin_data = plugin_timing_df[plugin_timing_df["proposal"] == proposal][
+            "total_plugin_time_ms"
+        ].values
+        plugin_means.append(np.mean(plugin_data))
+        plugin_stds.append(np.std(plugin_data))
 
-            # Scatter points
-            x_jitter = np.random.normal(pos, 0.03, len(data))
-            ax.scatter(
-                x_jitter,
-                data,
-                alpha=0.7,
-                s=25,
-                color=colors[j],
-                edgecolor="black",
-                linewidth=0.3,
-                label=f"{timing_type} Time" if i == 0 else "",
-            )
+        # Get network statistics from combined data
+        net_row = df_combined[df_combined["proposal"] == proposal].iloc[0]
+        network_means.append(net_row["network_time_ms"])
+        network_stds.append(net_row["network_std_ms"])
 
-    # Formatting
+    # Create colored shadow error bars first (behind)
+    # Plugin shadow error bars
+    ax.errorbar(
+        x_positions - offset,
+        plugin_means,
+        yerr=plugin_stds,
+        fmt="none",
+        color=color_palette[2],
+        linewidth=4,
+        capsize=10,
+        capthick=4,
+        alpha=0.4,
+        zorder=1,
+    )
+
+    # Network shadow error bars
+    ax.errorbar(
+        x_positions + offset,
+        network_means,
+        yerr=network_stds,
+        fmt="none",
+        color=color_palette[6],
+        linewidth=4,
+        capsize=10,
+        capthick=4,
+        alpha=0.4,
+        zorder=1,
+    )
+
+    # Create black error bars on top
+    # Plugin black error bars
+    ax.errorbar(
+        x_positions - offset,
+        plugin_means,
+        yerr=plugin_stds,
+        fmt="none",
+        color="black",
+        linewidth=1,
+        capsize=8,
+        capthick=1,
+        alpha=0.8,
+        zorder=3,
+    )
+
+    # Network black error bars
+    ax.errorbar(
+        x_positions + offset,
+        network_means,
+        yerr=network_stds,
+        fmt="none",
+        color="black",
+        linewidth=1,
+        capsize=8,
+        capthick=1,
+        alpha=0.8,
+        zorder=3,
+    )
+
+    # Create markers with black borders on top
+    # Plugin markers
+    ax.scatter(
+        x_positions - offset,
+        plugin_means,
+        s=25,
+        color=color_palette[2],
+        marker="o",
+        edgecolors="black",
+        linewidths=2,
+        alpha=0.9,
+        zorder=5,
+        label="Plugin Time",
+    )
+
+    # Network markers
+    ax.scatter(
+        x_positions + offset,
+        network_means,
+        s=25,
+        color=color_palette[6],
+        marker="s",
+        edgecolors="black",
+        linewidths=2,
+        alpha=0.9,
+        zorder=5,
+        label="Network Time",
+    )
+
+    # Customize plot
+    ylabel = "Time (milliseconds)"
+    if log_scale:
+        ylabel += " (log scale)"
+
     ax.set_title(
-        "Network Time vs Processing Overhead\n(Plugin Time - Network Time)",
+        "Plugin Time Overhead vs Network Time Comparison",
         fontweight="bold",
         fontsize=16,
         pad=20,
     )
-    ax.set_ylabel("Time (milliseconds)", fontweight="bold", fontsize=12)
+    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
     ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
-    ax.set_xticks(range(len(proposals)))
-    ax.set_xticklabels(proposals, rotation=45, ha="right")
-    ax.axhline(y=0, color="red", linestyle="--", alpha=0.7)
-    ax.legend(loc="upper right", fontsize=11)
+
+    # Set x-axis
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+
+    # Add legend
+    ax.legend(loc="lower right", fontsize=11, framealpha=0.9)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+    print(f"Created timing scatter comparison: {output_path}")
+
 
 def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
-    """Main analysis function using raw plugin data"""
+    """Main analysis function using corrected average-to-average comparison"""
     color_palette = setup_matplotlib_styling()
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load and process raw data
+    # Load and process data with corrected approach
     print("Loading raw plugin timing data and PCAP measurements...")
     result = load_and_compute_combined_timing(plugin_raw_csv, pcap_csv)
     if result is None:
@@ -1392,37 +1477,16 @@ def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
     df_combined, plugin_timing_df = result
 
     # Save combined statistics
-    df_combined_clean = df_combined.drop(
-        columns=["raw_plugin_data"]
-    )  # Remove the array column for CSV
-    df_combined_clean.to_csv(f"{output_dir}/combined_timing_stats.csv", index=False)
+    df_combined.to_csv(f"{output_dir}/combined_timing_stats.csv", index=False)
 
-    # Create plot using raw measurements
-    plot_raw_timing_comparison(
-        df_combined,
+    # Create boxplot comparison
+    plot_timing_comparison(
         plugin_timing_df,
-        f"{output_dir}/network_vs_processing.pdf",
+        df_combined,
+        f"{output_dir}/network_vs_processing_plot.pdf",
         color_palette,
+        log_scale=True,
     )
-
-    # Console summary
-    print("\nTiming Analysis Summary:")
-    print("-" * 70)
-    print(
-        f"{'Proposal':<20} {'Network (ms)':<15} {'Overhead (ms)':<15} {'Ratio %':<10}"
-    )
-    print("-" * 70)
-
-    for _, row in df_combined.iterrows():
-        ratio = (
-            (row["overhead_ms"] / row["network_time_ms"] * 100)
-            if row["network_time_ms"] > 0
-            else 0
-        )
-        print(
-            f"{row['proposal']:<20} {row['network_time_ms']:>7.1f}±{row['network_std_ms']:>4.1f} "
-            f"{row['overhead_ms']:>7.1f}±{row['overhead_std_ms']:>4.1f} {ratio:>7.1f}"
-        )
 
     return True
 

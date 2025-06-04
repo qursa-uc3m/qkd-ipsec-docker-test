@@ -26,6 +26,8 @@ def extract_ike_packets(pcap_file, log_message):
         "tshark",
         "-r",
         pcap_file,
+        "-t",
+        "e",
         "-Y",
         "isakmp",
         "-T",
