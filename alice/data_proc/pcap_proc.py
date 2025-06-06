@@ -39,7 +39,11 @@ def extract_ike_packets(pcap_file, log_message):
         "-e",
         "isakmp.messageid",
         "-e",
-        "frame.len",
+        "frame.len",  # Frame length (might be fragment)
+        "-e",
+        "isakmp.length",  # IKE message size
+        "-e",
+        "ip.frag_offset",  # Optional fragmentation info
         "-E",
         "separator=,",
         "-E",
@@ -66,6 +70,9 @@ def extract_ike_packets(pcap_file, log_message):
             43: "ike_intermediate",
         }
 
+        size_corrections = 0
+        large_messages = []
+
         for i, line in enumerate(lines):
             if line.strip():
                 try:
@@ -83,29 +90,141 @@ def extract_ike_packets(pcap_file, log_message):
                         )
 
                         frame_length = int(parts[3]) if parts[3] else 0
+
+                        # Get ISAKMP length (TRUE IKE message size)
+                        isakmp_length = (
+                            int(parts[4]) if len(parts) > 4 and parts[4] else 0
+                        )
+
+                        # Get fragmentation info if available
+                        frag_offset = parts[5] if len(parts) > 5 else "0"
+                        is_fragmented = frag_offset != "0" and frag_offset != ""
+
+                        # PRIORITY: Use ISAKMP length when available (most accurate)
+                        if isakmp_length > 0:
+                            actual_size = isakmp_length
+                            if isakmp_length != frame_length:
+                                size_corrections += 1
+                                log_message(
+                                    f"  Size corrected: Frame={frame_length}B → True IKE={isakmp_length}B"
+                                )
+                        else:
+                            actual_size = frame_length
+
                         exchange_type = exchange_types.get(
                             exchange_type_num, f"unknown_{exchange_type_num}"
                         )
 
-                        packets.append(
-                            {
-                                "timestamp": timestamp,
-                                "exchange_type": exchange_type,
-                                "message_id": message_id,
-                                "frame_length": frame_length,
-                            }
-                        )
+                        packet_info = {
+                            "timestamp": timestamp,
+                            "exchange_type": exchange_type,
+                            "message_id": message_id,
+                            "frame_length": actual_size,  # Use TRUE IKE size for backward compatibility
+                            "raw_frame_length": frame_length,  # Raw frame length
+                            "isakmp_length": isakmp_length,  # True ISAKMP size
+                            "fragmented": is_fragmented
+                            or (isakmp_length > frame_length),
+                        }
+
+                        packets.append(packet_info)
+
+                        # Track large messages
+                        if actual_size > 1400:
+                            large_messages.append(f"{exchange_type}: {actual_size}B")
 
                 except (ValueError, IndexError) as e:
                     log_message(f"Warning: Could not parse packet {i+1}: {line} - {e}")
                     continue
 
         log_message(f"Found {len(packets)} IKE packets")
+
+        # Report size corrections (fragmentation handling)
+        if size_corrections > 0:
+            log_message(
+                f"✓ Corrected {size_corrections} packet sizes (fragmentation detected)"
+            )
+
+        if large_messages:
+            log_message(f"Large IKE messages (>1400B): {len(large_messages)} found")
+            for msg in large_messages[:3]:  # Show first 3
+                log_message(f"  {msg}")
+            if len(large_messages) > 3:
+                log_message(f"  ... and {len(large_messages) - 3} more")
+
         return packets
 
     except Exception as e:
         log_message(f"Error running tshark: {e}")
         return []
+
+
+def check_for_missed_fragments(pcap_file, ike_packet_count, log_message):
+    """Check if there are fragmented IKE packets we missed"""
+    cmd_check = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-Y",
+        "(udp.port == 500 or udp.port == 4500) and ip.frag_offset > 0",
+        "-T",
+        "fields",
+        "-e",
+        "frame.number",
+        "-e",
+        "ip.id",
+        "-e",
+        "ip.frag_offset",
+        "-e",
+        "frame.len",
+        "-E",
+        "separator=,",
+        "-E",
+        "occurrence=f",
+    ]
+
+    try:
+        result = subprocess.run(cmd_check, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
+            if lines:
+                log_message(
+                    f"Found {len(lines)} fragmented IKE port packets not captured by ISAKMP filter"
+                )
+
+                # Group by IP ID to understand fragmentation patterns
+                fragments_by_id = defaultdict(list)
+                for line in lines:
+                    parts = line.split(",")
+                    if len(parts) >= 4:
+                        try:
+                            frame_num = parts[0]
+                            ip_id = parts[1]
+                            frag_offset = int(parts[2]) if parts[2] else 0
+                            frame_len = int(parts[3]) if parts[3] else 0
+                            fragments_by_id[ip_id].append(
+                                (frame_num, frag_offset, frame_len)
+                            )
+                        except ValueError:
+                            continue
+
+                # Report fragmentation groups
+                for ip_id, frags in list(fragments_by_id.items())[
+                    :3
+                ]:  # Show first 3 groups
+                    frags.sort(key=lambda x: x[1])  # Sort by offset
+                    total_size = sum(f[2] for f in frags)
+                    log_message(
+                        f"  Fragment group {ip_id}: {len(frags)} fragments, {total_size}B total"
+                    )
+
+                if len(fragments_by_id) > 3:
+                    log_message(
+                        f"  ... and {len(fragments_by_id) - 3} more fragment groups"
+                    )
+            else:
+                log_message("No additional fragmented IKE packets found")
+    except Exception as e:
+        log_message(f"Error checking for missed fragments: {e}")
 
 
 def get_total_pcap_bytes(pcap_file, log_message):
@@ -124,6 +243,8 @@ def get_total_pcap_bytes(pcap_file, log_message):
         "fields",
         "-e",
         "frame.len",
+        "-e",
+        "ip.frag_offset",
         "-E",
         "separator=,",
         "-E",
@@ -143,13 +264,21 @@ def get_total_pcap_bytes(pcap_file, log_message):
 
         total_bytes = 0
         packet_count = 0
+        fragment_count = 0
 
         for line in lines:
             if line.strip():
                 try:
-                    frame_length = int(line.strip()) if line.strip() else 0
+                    parts = line.split(",")
+                    frame_length = int(parts[0]) if parts[0] else 0
+                    frag_offset = parts[1] if len(parts) > 1 else "0"
+
                     total_bytes += frame_length
                     packet_count += 1
+
+                    if frag_offset and frag_offset != "0":
+                        fragment_count += 1
+
                 except ValueError:
                     continue
 
@@ -198,7 +327,6 @@ def calculate_ike_handshake_latencies(packets, filename, log_message, iters=1):
 
     # Group IKE_SA_INIT packets by pairs (request + response)
     ike_sa_init_timestamps = ike_sa_init_packets["timestamp"].values
-
     ike_handshake_latencies = []
 
     for iter_num in range(iters):
@@ -244,7 +372,12 @@ def calculate_ike_handshake_latencies(packets, filename, log_message, iters=1):
                 exchange_info = ", ".join(
                     [f"{ex}: {count}" for ex, count in pre_auth_exchanges.items()]
                 )
-                log_message(f"  Included exchanges: {exchange_info}")
+
+                # Calculate total IKE bytes in this handshake (using corrected sizes)
+                total_handshake_bytes = pre_auth_packets["frame_length"].sum()
+                log_message(
+                    f"  Included exchanges: {exchange_info} (Total: {total_handshake_bytes}B)"
+                )
             else:
                 log_message(
                     f"Warning: No packets found before IKE_AUTH in iteration {iter_num + 1}"
@@ -294,23 +427,35 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
     exchange_counts = defaultdict(int)
     exchange_bytes = defaultdict(int)
     total_ike_bytes = 0
+    fragmented_count = 0
 
     for packet in packets:
         exchange_type = packet["exchange_type"]
-        frame_length = packet["frame_length"]
+        # Use frame_length
+        ike_size = packet["frame_length"]
+
         exchange_counts[exchange_type] += 1
-        exchange_bytes[exchange_type] += frame_length
-        total_ike_bytes += frame_length
+        exchange_bytes[exchange_type] += ike_size
+        total_ike_bytes += ike_size
+
+        if packet.get("fragmented", False):
+            fragmented_count += 1
 
     # Normalize by iterations
     total_ike_bytes = total_ike_bytes // iters
     total_pcap_bytes = total_pcap_bytes // iters
     total_message_count = len(packets) // iters
+    fragmented_count = fragmented_count // iters
 
     # Log analysis results
-    log_message(
-        f"Analysis complete: {total_message_count} IKE packets per iteration, {total_ike_bytes:,} IKE bytes per iteration"
-    )
+    log_message(f"Analysis complete: {total_message_count} IKE messages per iteration")
+    log_message(f"Total TRUE IKE message bytes per iteration: {total_ike_bytes:,}")
+
+    if fragmented_count > 0:
+        log_message(
+            f"Fragmented messages: {fragmented_count}/{total_message_count} ({fragmented_count/total_message_count*100:.1f}%)"
+        )
+
     if total_pcap_bytes > 0:
         non_ike_bytes = total_pcap_bytes - total_ike_bytes
         ike_percentage = (total_ike_bytes / total_pcap_bytes) * 100
@@ -322,6 +467,17 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
         log_message(
             f"Non-IKE traffic per iteration: {non_ike_bytes:,} bytes ({100-ike_percentage:.1f}%)"
         )
+
+    # Log exchange breakdown with TRUE sizes
+    log_message("Exchange type breakdown (TRUE IKE message sizes per iteration):")
+    for exchange_type, count in exchange_counts.items():
+        norm_count = count // iters
+        norm_bytes = exchange_bytes[exchange_type] // iters
+        if norm_count > 0:
+            avg_size = norm_bytes / norm_count
+            log_message(
+                f"  {exchange_type}: {norm_count} messages, {norm_bytes:,} bytes (avg: {avg_size:.1f}B/msg)"
+            )
 
     # Create combined stats
     combined_stats = {
@@ -335,6 +491,7 @@ def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
             (total_ike_bytes / total_pcap_bytes * 100) if total_pcap_bytes > 0 else 0
         ),
         "total_message_count": total_message_count,
+        "fragmented_message_count": fragmented_count,
         "ike_latency_avg": 0,  # Will be updated with IKE handshake latency
         "ike_latency_std": 0,  # Will be updated with IKE handshake latency
     }
@@ -379,6 +536,7 @@ def create_empty_combined_stats(prop):
         "non_ike_bytes": 0,
         "ike_percentage": 0,
         "total_message_count": 0,
+        "fragmented_message_count": 0,
         "ike_latency_avg": 0,
         "ike_latency_std": 0,
     }
@@ -428,13 +586,13 @@ def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
     ike_latency_ms = combined_stats.get("ike_latency_avg", 0) * 1000
     ike_latency_std_ms = combined_stats.get("ike_latency_std", 0) * 1000
     log_message(
-        f"Results for {prop}: {combined_stats['total_message_count']} IKE packets per iteration, "
+        f"Results for {prop}: {combined_stats['total_message_count']} IKE messages per iteration, "
         f"{combined_stats['total_ike_bytes']:,} IKE bytes per iteration, "
         f"{combined_stats['total_pcap_bytes']:,} total bytes per iteration, "
         f"IKE handshake latency: {ike_latency_ms:.2f}±{ike_latency_std_ms:.2f}ms"
     )
 
-    return combined_stats, {}  # No exchange-level latencies returned
+    return combined_stats, {}
 
 
 def generate_pcap_report(
@@ -464,8 +622,8 @@ def generate_pcap_report(
             ike_latency_avg = row.get("ike_latency_avg", 0)
             ike_latency_std = row.get("ike_latency_std", 0)
 
-            f.write(f"Total IKE Packets (per iteration): {total_packets}\n")
-            f.write(f"Total IKE Bytes (per iteration): {total_ike_bytes:,}\n")
+            f.write(f"Total IKE Messages (per iteration): {total_packets}\n")
+            f.write(f"Total IKE Message Bytes (per iteration): {total_ike_bytes:,}\n")
             f.write(f"Total PCAP Bytes (per iteration): {total_pcap_bytes:,}\n")
             f.write(f"Non-IKE Bytes (per iteration): {non_ike_bytes:,}\n")
             f.write(f"IKE Percentage: {ike_percentage:.1f}%\n")
@@ -488,7 +646,10 @@ def generate_pcap_report(
                 count = row.get(f"{exchange}_count", 0)
                 if count > 0:
                     bytes_val = row.get(f"{exchange}_bytes", 0)
-                    f.write(f"  {display_name}: {count} packets, {bytes_val:,} bytes\n")
+                    avg_size = bytes_val / count if count > 0 else 0
+                    f.write(
+                        f"  {display_name}: {count} messages, {bytes_val:,} bytes (avg: {avg_size:.1f} bytes/msg)\n"
+                    )
 
             # Plugin timing
             plugin_data = (
@@ -538,7 +699,7 @@ def generate_pcap_report(
             )
 
             f.write(
-                f"Total IKE bytes processed (per iteration): {summary_stats['total_ike_bytes']:,}\n"
+                f"Total IKE message bytes processed (per iteration): {summary_stats['total_ike_bytes']:,}\n"
             )
             f.write(
                 f"Total PCAP bytes processed (per iteration): {summary_stats['total_pcap_bytes']:,}\n"
