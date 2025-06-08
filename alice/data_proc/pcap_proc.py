@@ -158,75 +158,6 @@ def extract_ike_packets(pcap_file, log_message):
         return []
 
 
-def check_for_missed_fragments(pcap_file, ike_packet_count, log_message):
-    """Check if there are fragmented IKE packets we missed"""
-    cmd_check = [
-        "tshark",
-        "-r",
-        pcap_file,
-        "-Y",
-        "(udp.port == 500 or udp.port == 4500) and ip.frag_offset > 0",
-        "-T",
-        "fields",
-        "-e",
-        "frame.number",
-        "-e",
-        "ip.id",
-        "-e",
-        "ip.frag_offset",
-        "-e",
-        "frame.len",
-        "-E",
-        "separator=,",
-        "-E",
-        "occurrence=f",
-    ]
-
-    try:
-        result = subprocess.run(cmd_check, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
-            if lines:
-                log_message(
-                    f"Found {len(lines)} fragmented IKE port packets not captured by ISAKMP filter"
-                )
-
-                # Group by IP ID to understand fragmentation patterns
-                fragments_by_id = defaultdict(list)
-                for line in lines:
-                    parts = line.split(",")
-                    if len(parts) >= 4:
-                        try:
-                            frame_num = parts[0]
-                            ip_id = parts[1]
-                            frag_offset = int(parts[2]) if parts[2] else 0
-                            frame_len = int(parts[3]) if parts[3] else 0
-                            fragments_by_id[ip_id].append(
-                                (frame_num, frag_offset, frame_len)
-                            )
-                        except ValueError:
-                            continue
-
-                # Report fragmentation groups
-                for ip_id, frags in list(fragments_by_id.items())[
-                    :3
-                ]:  # Show first 3 groups
-                    frags.sort(key=lambda x: x[1])  # Sort by offset
-                    total_size = sum(f[2] for f in frags)
-                    log_message(
-                        f"  Fragment group {ip_id}: {len(frags)} fragments, {total_size}B total"
-                    )
-
-                if len(fragments_by_id) > 3:
-                    log_message(
-                        f"  ... and {len(fragments_by_id) - 3} more fragment groups"
-                    )
-            else:
-                log_message("No additional fragmented IKE packets found")
-    except Exception as e:
-        log_message(f"Error checking for missed fragments: {e}")
-
-
 def get_total_pcap_bytes(pcap_file, log_message):
     """Get total bytes in PCAP file (all traffic)"""
     if not os.path.exists(pcap_file):
@@ -292,129 +223,185 @@ def get_total_pcap_bytes(pcap_file, log_message):
         return 0
 
 
-def calculate_ike_handshake_latencies(packets, filename, log_message, iters=1):
-    """Calculate IKE handshake latency from first IKE_SA_INIT to last message before first IKE_AUTH per iteration"""
+def calculate_ike_handshake_latencies(
+    packets, filename, log_message, iters=1, pcap_file=None
+):
+    """Calculate IKE handshake latency"""
     if not packets:
         log_message("No packets for latency calculation")
         return []
 
-    # Convert packets to DataFrame
-    df_packets = pd.DataFrame(packets)
+    df_packets = pd.DataFrame(packets).sort_values("timestamp").reset_index(drop=True)
+
+    # Fragment correction
+    fragment_corrections = {}
+    if pcap_file and os.path.exists(pcap_file):
+        try:
+            result = subprocess.run(
+                [
+                    "tshark",
+                    "-r",
+                    pcap_file,
+                    "-t",
+                    "e",
+                    "-Y",
+                    "(udp.port == 500 or udp.port == 4500) and (ip.frag_offset == 0 or isakmp)",
+                    "-T",
+                    "fields",
+                    "-e",
+                    "frame.time_epoch",
+                    "-e",
+                    "ip.frag_offset",
+                    "-e",
+                    "isakmp.exchangetype",
+                    "-e",
+                    "ip.id",
+                    "-E",
+                    "separator=,",
+                    "-E",
+                    "occurrence=f",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+
+            if result.returncode == 0:
+                first_frags, reassembled = {}, {}
+                for line in result.stdout.strip().split("\n"):
+                    if line.strip():
+                        parts = line.split(",")
+                        if len(parts) >= 4:
+                            timestamp = float(parts[0]) if parts[0] else 0
+                            if parts[1] == "0":  # First fragment
+                                first_frags[parts[3]] = timestamp
+                            elif parts[2] in [
+                                "34",
+                                "43",
+                            ]:  # IKE_SA_INIT or IKE_INTERMEDIATE
+                                reassembled[parts[3]] = timestamp
+
+                for ip_id in first_frags:
+                    if ip_id in reassembled and reassembled[ip_id] > first_frags[ip_id]:
+                        fragment_corrections[reassembled[ip_id]] = first_frags[ip_id]
+
+                if fragment_corrections:
+                    log_message(
+                        f"Applied {len(fragment_corrections)} fragment timing corrections"
+                    )
+        except Exception as e:
+            log_message(f"Fragment correction failed: {e}")
+
+    # Apply corrections
+    for i, row in df_packets.iterrows():
+        if row["timestamp"] in fragment_corrections:
+            df_packets.at[i, "timestamp"] = fragment_corrections[row["timestamp"]]
+
     df_packets = df_packets.sort_values("timestamp").reset_index(drop=True)
 
-    # Find IKE_SA_INIT packets to identify iteration boundaries
+    # Find IKE_SA_INIT packets - these mark handshake boundaries
     ike_sa_init_packets = df_packets[df_packets["exchange_type"] == "ike_sa_init"]
+    log_message(f"Found {len(ike_sa_init_packets)} IKE_SA_INIT packets")
 
     if len(ike_sa_init_packets) == 0:
         log_message("Error: No IKE_SA_INIT packets found")
         return []
 
-    # Each iteration should have 2 IKE_SA_INIT packets (request + response)
+    # Expected: 2 IKE_SA_INIT per iteration (request + response)
     expected_sa_init_count = iters * 2
     actual_sa_init_count = len(ike_sa_init_packets)
 
-    if actual_sa_init_count != expected_sa_init_count:
-        log_message(
-            f"Warning: Expected {expected_sa_init_count} IKE_SA_INIT packets ({iters} iterations × 2), found {actual_sa_init_count}"
-        )
-        # Adjust iterations based on actual packets found
-        iters = actual_sa_init_count // 2
-        log_message(f"Adjusting to {iters} iterations based on packet count")
+    log_message(
+        f"Expected {expected_sa_init_count} IKE_SA_INIT packets for {iters} iterations, found {actual_sa_init_count}"
+    )
 
-    if iters == 0:
+    # Calculate actual iterations based on packet pairs
+    actual_iterations = min(iters, actual_sa_init_count // 2)
+    if actual_iterations == 0:
         log_message("Error: No complete iterations found")
         return []
 
-    # Group IKE_SA_INIT packets by pairs (request + response)
+    latencies = []
     ike_sa_init_timestamps = ike_sa_init_packets["timestamp"].values
-    ike_handshake_latencies = []
 
-    for iter_num in range(iters):
-        # Each iteration starts with the first IKE_SA_INIT packet of the pair
-        iter_start_time = ike_sa_init_timestamps[iter_num * 2]  # First packet of pair
+    # Process each iteration (pair of IKE_SA_INIT packets)
+    for iter_num in range(actual_iterations):
+        iter_start_time = ike_sa_init_timestamps[
+            iter_num * 2
+        ]  # First IKE_SA_INIT of pair
 
         # Define iteration boundary
-        if iter_num < iters - 1:
-            # Next iteration starts with the next IKE_SA_INIT pair
-            iter_end_boundary = ike_sa_init_timestamps[(iter_num + 1) * 2]
-            iter_mask = (df_packets["timestamp"] >= iter_start_time) & (
-                df_packets["timestamp"] < iter_end_boundary
-            )
+        if iter_num < actual_iterations - 1:
+            iter_end_boundary = ike_sa_init_timestamps[
+                (iter_num + 1) * 2
+            ]  # Next iteration start
         else:
-            # Last iteration - include all remaining packets
-            iter_mask = df_packets["timestamp"] >= iter_start_time
+            iter_end_boundary = float("inf")  # Last iteration
 
-        iter_packets = df_packets[iter_mask]
+        log_message(
+            f"Processing iteration {iter_num + 1}: start={iter_start_time:.6f}, boundary={iter_end_boundary}"
+        )
 
-        # Find first IKE_SA_INIT and first IKE_AUTH in this iteration
-        iter_ike_sa_init = iter_packets[iter_packets["exchange_type"] == "ike_sa_init"]
+        # Get all packets in this iteration
+        iter_packets = df_packets[
+            (df_packets["timestamp"] >= iter_start_time)
+            & (df_packets["timestamp"] < iter_end_boundary)
+        ]
+
+        log_message(f"  Iteration {iter_num + 1} has {len(iter_packets)} packets")
+
+        # Find first IKE_AUTH in this iteration
         iter_ike_auth = iter_packets[iter_packets["exchange_type"] == "ike_auth"]
 
-        if len(iter_ike_sa_init) == 0:
-            log_message(f"Warning: Missing IKE_SA_INIT in iteration {iter_num + 1}")
-            ike_handshake_latencies.append(0.0)
-            continue
-
-        # Get first IKE_SA_INIT timestamp
-        first_ike_sa_init = iter_ike_sa_init["timestamp"].min()
-
-        # Find last message before first IKE_AUTH
         if len(iter_ike_auth) > 0:
             first_ike_auth = iter_ike_auth["timestamp"].min()
-            # Get all packets before first IKE_AUTH (including IKE_SA_INIT and IKE_INTERMEDIATE)
+            log_message(f"  Found IKE_AUTH at {first_ike_auth:.6f}")
+
+            # Get all packets before first IKE_AUTH
             pre_auth_packets = iter_packets[iter_packets["timestamp"] < first_ike_auth]
 
             if len(pre_auth_packets) > 0:
-                last_pre_auth_timestamp = pre_auth_packets["timestamp"].max()
-
-                # Show breakdown of included exchanges
-                pre_auth_exchanges = pre_auth_packets["exchange_type"].value_counts()
-                exchange_info = ", ".join(
-                    [f"{ex}: {count}" for ex, count in pre_auth_exchanges.items()]
-                )
-
-                # Calculate total IKE bytes in this handshake (using corrected sizes)
-                total_handshake_bytes = pre_auth_packets["frame_length"].sum()
-                log_message(
-                    f"  Included exchanges: {exchange_info} (Total: {total_handshake_bytes}B)"
-                )
+                end_time = pre_auth_packets["timestamp"].max()
+                exchanges = pre_auth_packets["exchange_type"].value_counts()
+                log_message(f"  Pre-AUTH exchanges: {dict(exchanges)}")
             else:
-                log_message(
-                    f"Warning: No packets found before IKE_AUTH in iteration {iter_num + 1}"
-                )
-                last_pre_auth_timestamp = first_ike_sa_init
+                log_message(f"  Warning: No pre-AUTH packets found")
+                end_time = iter_start_time
         else:
-            # No IKE_AUTH found - use last packet in iteration (fallback)
-            log_message(
-                f"Warning: No IKE_AUTH found in iteration {iter_num + 1}, using last packet"
+            log_message(f"  No IKE_AUTH found in iteration, using all packets")
+            end_time = (
+                iter_packets["timestamp"].max()
+                if len(iter_packets) > 0
+                else iter_start_time
             )
-            last_pre_auth_timestamp = iter_packets["timestamp"].max()
 
-        # Calculate handshake latency: first IKE_SA_INIT to last pre-auth message
-        handshake_latency = last_pre_auth_timestamp - first_ike_sa_init
-        ike_handshake_latencies.append(handshake_latency)
-
+        latency = end_time - iter_start_time
+        latencies.append(latency)
         log_message(
-            f"Iteration {iter_num + 1}: {handshake_latency:.6f}s ({handshake_latency*1000:.2f}ms)"
+            f"  Iteration {iter_num + 1}: {latency*1000:.2f}ms (start: {iter_start_time:.6f}, end: {end_time:.6f})"
         )
-        log_message(f"  First IKE_SA_INIT: {first_ike_sa_init:.6f}")
-        log_message(f"  Last pre-AUTH message: {last_pre_auth_timestamp:.6f}")
 
-    # Save simple summary
-    summary_data = []
-    for i, latency in enumerate(ike_handshake_latencies):
-        summary_data.append(
+    log_message(f"Calculated {len(latencies)} handshake latencies")
+
+    # Save results
+    if latencies:
+        summary_data = [
             {
                 "iteration": i + 1,
-                "handshake_latency_seconds": latency,
-                "handshake_latency_ms": latency * 1000,
+                "handshake_latency_seconds": lat,
+                "handshake_latency_ms": lat * 1000,
             }
-        )
+            for i, lat in enumerate(latencies)
+        ]
+        pd.DataFrame(summary_data).to_csv(filename, index=False)
+        log_message(f"Saved {len(summary_data)} measurements to {filename}")
+    else:
+        log_message("No latencies calculated - creating empty file")
+        pd.DataFrame(
+            columns=["iteration", "handshake_latency_seconds", "handshake_latency_ms"]
+        ).to_csv(filename, index=False)
 
-    pd.DataFrame(summary_data).to_csv(filename, index=False)
-    log_message(f"Saved handshake summary to {filename}")
-
-    return ike_handshake_latencies
+    return latencies
 
 
 def analyze_packets(packets, prop, log_message, total_pcap_bytes=0, iters=1):
@@ -576,7 +563,11 @@ def process_ike_data(pcap_file, output_dir, prop, log_message, iters=1):
 
     # Calculate IKE handshake latencies per iteration
     ike_handshake_latencies = calculate_ike_handshake_latencies(
-        packets, f"{output_dir}/handshake_summary_{prop}.csv", log_message, iters
+        packets,
+        f"{output_dir}/handshake_summary_{prop}.csv",
+        log_message,
+        iters,
+        pcap_file,
     )
 
     # Update combined stats with latency data
