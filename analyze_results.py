@@ -1299,23 +1299,18 @@ def generate_raw_boxplot_data(df_combined, plugin_timing_df):
 
 
 def plot_timing_comparison(
-    plugin_timing_df, df_combined, output_path, color_palette=None, log_scale=True
+    plugin_timing_df,
+    df_combined,
+    output_path,
+    color_palette=None,
 ):
     """Create scatter plot showing processing overhead vs network time"""
     if color_palette is None:
         color_palette = setup_matplotlib_styling()
 
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(10, 12))
 
-    # Set logarithmic scale by default
-    if log_scale:
-        ax.set_yscale("log")
-        # Sparse grid for log scale - only major ticks
-        ax.grid(True, linestyle="--", which="major", color="grey", alpha=0.6)
-        ax.grid(True, linestyle=":", which="minor", color="grey", alpha=0.2)
-    else:
-        # Regular grid for linear scale
-        ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
 
     ax.set_axisbelow(True)
 
@@ -1323,7 +1318,7 @@ def plot_timing_comparison(
     n_proposals = len(proposals)
 
     # Set up positions for side-by-side scatter points
-    offset = 0.15
+    offset = 0.2
     x_positions = np.arange(n_proposals)
 
     # Get data directly from df_combined (already calculated)
@@ -1332,100 +1327,134 @@ def plot_timing_comparison(
     overhead_means = df_combined["overhead_ms"].values
     overhead_stds = df_combined["overhead_std_ms"].values
 
-    # Create colored shadow error bars first (behind)
-    # Network shadow error bars
-    ax.errorbar(
-        x_positions - offset,
-        network_means,
-        yerr=network_stds,
-        fmt="none",
-        color=color_palette[2],
-        linewidth=4,
-        capsize=10,
-        capthick=4,
-        alpha=0.4,
-        zorder=1,
-    )
+    # Calculate plot positions
+    network_x = x_positions - offset
+    overhead_x = x_positions + offset
 
-    # Overhead shadow error bars
-    ax.errorbar(
-        x_positions + offset,
-        overhead_means,
-        yerr=overhead_stds,
-        fmt="none",
-        color=color_palette[6],
-        linewidth=4,
-        capsize=10,
-        capthick=4,
-        alpha=0.4,
-        zorder=1,
-    )
+    try:
+        # Create colored shadow error bars first (behind)
+        network_errorbar = ax.errorbar(
+            network_x,
+            network_means,
+            yerr=network_stds,
+            fmt="none",
+            color=color_palette[2],
+            linewidth=4,
+            capsize=10,
+            capthick=4,
+            alpha=0.4,
+            zorder=1,
+        )
 
-    # Create black error bars on top
-    # Network black error bars
-    ax.errorbar(
-        x_positions - offset,
-        network_means,
-        yerr=network_stds,
-        fmt="none",
-        color="black",
-        linewidth=1,
-        capsize=8,
-        capthick=1,
-        alpha=0.8,
-        zorder=3,
-    )
+        overhead_errorbar = ax.errorbar(
+            overhead_x,
+            overhead_means,
+            yerr=overhead_stds,
+            fmt="none",
+            color=color_palette[6],
+            linewidth=4,
+            capsize=10,
+            capthick=4,
+            alpha=0.4,
+            zorder=1,
+        )
 
-    # Overhead black error bars
-    ax.errorbar(
-        x_positions + offset,
-        overhead_means,
-        yerr=overhead_stds,
-        fmt="none",
-        color="black",
-        linewidth=1,
-        capsize=8,
-        capthick=1,
-        alpha=0.8,
-        zorder=3,
-    )
+        # Create black error bars on top
+        ax.errorbar(
+            network_x,
+            network_means,
+            yerr=network_stds,
+            fmt="none",
+            color="black",
+            linewidth=1,
+            capsize=8,
+            capthick=1,
+            alpha=0.8,
+            zorder=3,
+        )
 
-    # Create markers with black borders on top
-    # Network markers
-    ax.scatter(
-        x_positions - offset,
-        network_means,
-        s=25,
-        color=color_palette[2],
-        marker="o",
-        edgecolors="black",
-        linewidths=2,
-        alpha=0.9,
-        zorder=5,
-        label=r"Network Time ($t_{\mathrm{net}}$)",
-    )
+        ax.errorbar(
+            overhead_x,
+            overhead_means,
+            yerr=overhead_stds,
+            fmt="none",
+            color="black",
+            linewidth=1,
+            capsize=8,
+            capthick=1,
+            alpha=0.8,
+            zorder=3,
+        )
 
-    # Overhead markers
-    ax.scatter(
-        x_positions + offset,
-        overhead_means,
-        s=25,
-        color=color_palette[6],
-        marker="s",
-        edgecolors="black",
-        linewidths=2,
-        alpha=0.9,
-        zorder=5,
-        label=r"Processing Overhead ($\Delta t_{\mathrm{overhead}}$)",
-    )
+        # Create markers with black borders on top
+        network_scatter = ax.scatter(
+            network_x,
+            network_means,
+            s=80,
+            color=color_palette[2],
+            marker="o",
+            edgecolors="black",
+            linewidths=2,
+            alpha=0.9,
+            zorder=5,
+            label=r"Network Time ($t_{\mathrm{net}}$)",
+        )
+
+        overhead_scatter = ax.scatter(
+            overhead_x,
+            overhead_means,
+            s=80,
+            color=color_palette[6],
+            marker="s",
+            edgecolors="black",
+            linewidths=2,
+            alpha=0.9,
+            zorder=5,
+            label=r"Processing Overhead ($\Delta t_{\mathrm{overhead}}$)",
+        )
+
+    except Exception as e:
+        print(f"ERROR: Failed to create plot elements: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return
+
+    # Try to set axis limits
+    try:
+        # X-axis:
+        ax.set_xlim(-0.5, n_proposals - 0.5)
+
+        # Y-axis:
+        all_y_values = np.concatenate(
+            [
+                network_means - network_stds,  # network min
+                network_means + network_stds,  # network max
+                overhead_means - overhead_stds,  # overhead min
+                overhead_means + overhead_stds,  # overhead max
+            ]
+        )
+        all_y_values = all_y_values[~np.isnan(all_y_values)]  # Remove NaN
+        all_y_values = all_y_values[np.isfinite(all_y_values)]  # Remove inf
+
+        # For linear scale
+        if len(all_y_values) > 0:
+            y_range = np.max(all_y_values) - np.min(all_y_values)
+            y_min = np.min(all_y_values)
+            y_max = np.max(all_y_values)
+            ax.set_ylim(y_min, y_max)
+            print(f"DEBUG: Set linear scale Y limits: {y_min:.6f} - {y_max:.6f}")
+        else:
+            print("ERROR: No valid values for linear scale!")
+
+    except Exception as e:
+        print(f"ERROR: Failed to set axis limits: {e}")
 
     # Customize plot
     ylabel = "Time (milliseconds)"
-    if log_scale:
-        ylabel += " (log scale)"
 
     ax.set_title(
-        r"Comparison of Network Communication Time ($t_{\mathrm{net}}$) and Plugin Processing Additional Overhead ($\Delta t_{\mathrm{overhead}}$)",
+        r"Network Communication Time vs Plugin Processing Overhead",
         fontweight="bold",
         fontsize=14,
         pad=20,
@@ -1435,17 +1464,24 @@ def plot_timing_comparison(
 
     # Set x-axis
     ax.set_xticks(x_positions)
-    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
     ax.tick_params(axis="y", labelsize=11)
 
     # Add legend
-    ax.legend(loc="lower right", fontsize=11, framealpha=0.9)
+    ax.legend(loc="best", framealpha=0.9)
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+    try:
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"DEBUG: Plot saved successfully to {output_path}")
+    except Exception as e:
+        print(f"ERROR: Failed to save plot: {e}")
+
     plt.close()
 
     print(f"Created network vs overhead comparison: {output_path}")
+    print("=" * 60)
 
 
 def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
@@ -1470,7 +1506,6 @@ def analyze_combined_timing(plugin_raw_csv, pcap_csv, output_dir="analysis"):
         df_combined,
         f"{output_dir}/network_vs_processing_plot.pdf",
         color_palette,
-        log_scale=True,
     )
 
     return True
