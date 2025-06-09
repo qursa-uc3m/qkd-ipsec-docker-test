@@ -21,52 +21,82 @@ fi
 if [ "${ETSI_API_VERSION}" = "004" ]; then
     echo "Setting up ETSI 004 environment:"
     
-    # NEW: QKD URI Configuration for flexible adapter (highest priority)
-    export QKD_SOURCE_URI=${QKD_SOURCE_URI:-"client://qkd_server_alice:25575"}
-    export QKD_DEST_URI=${QKD_DEST_URI:-"server://qkd_server_bob:25576"}
+    # QKD URI Configuration
+    # Don't override if already set by Docker Compose
+    if [ -z "$QKD_SOURCE_URI" ]; then
+        export QKD_SOURCE_URI="client://qkd_server_alice:25575"
+    fi
+    if [ -z "$QKD_DEST_URI" ]; then
+        export QKD_DEST_URI="server://qkd_server_bob:25576"
+    fi
     
-    # NEW: QKD Host/Port Configuration (fallback for URI construction)
+    # QKD Host/Port Configuration (fallback for URI construction)
     export QKD_CLIENT_HOST=${QKD_CLIENT_HOST:-"qkd_server_alice"}
     export QKD_SERVER_HOST=${QKD_SERVER_HOST:-"qkd_server_bob"}
     export QKD_CLIENT_PORT=${QKD_CLIENT_PORT:-"25575"}
     export QKD_SERVER_PORT=${QKD_SERVER_PORT:-"25576"}
     
-    # NEW: QKD QoS Configuration (for flexible adapter)
+    # QKD QoS Configuration (for flexible adapter)
     export QKD_KEY_CHUNK_SIZE=${QKD_KEY_CHUNK_SIZE:-32}
     export QKD_TIMEOUT=${QKD_TIMEOUT:-60000}
     export QKD_MAX_BPS=${QKD_MAX_BPS:-40000}
     export QKD_MIN_BPS=${QKD_MIN_BPS:-5000}
     
-    # NEW: Legacy KME settings for backward compatibility
+    # Legacy KME settings for backward compatibility
     export QKD_MASTER_KME_HOSTNAME=${QKD_MASTER_KME_HOSTNAME:-"qkd_server_alice"}
     export QKD_SLAVE_KME_HOSTNAME=${QKD_SLAVE_KME_HOSTNAME:-"qkd_server_bob"}
     export QKD_MASTER_SAE=${QKD_MASTER_SAE:-"sae-1"}
     export QKD_SLAVE_SAE=${QKD_SLAVE_SAE:-"sae-2"}
     
-    # Server connection settings for ETSI 004 (original variable names)
+    # Server connection settings for ETSI 004
     export SERVER_ADDRESS=${SERVER_ADDRESS:-"qkd_server_bob"}
     export SERVER_PORT=${SERVER_PORT:-25576}
     export CLIENT_ADDRESS=${CLIENT_ADDRESS:-"qkd_server_alice"}
     
-    # Certificate paths for ETSI 004 (original variable names)
-    export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"}
-    export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"}
-    export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_bob.pem"}
+    # Certificate configuration
+    # Only set defaults if not already provided by Docker Compose
+    CONTAINER_NAME=$(hostname)
+    
+    if [ "$CONTAINER_NAME" = "alice" ] || [ "$QKD_ROLE" = "alice" ]; then
+        # Alice configuration - connects to Alice's server
+        export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"}
+        export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"}
+        export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_alice.pem"}
+        echo "Configured as Alice (connects to Alice's server)"
+    elif [ "$CONTAINER_NAME" = "bob" ] || [ "$QKD_ROLE" = "bob" ]; then
+        # Bob configuration - connects to Bob's server with Bob's certificates
+        export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_bob.pem"}
+        export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_bob.pem"}
+        export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_bob.pem"}
+        echo "Configured as Bob (connects to Bob's server)"
+    else
+        # Default fallback - but don't override if set by Docker Compose
+        if [ -z "$CLIENT_CERT_PEM" ]; then
+            export CLIENT_CERT_PEM="${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"
+        fi
+        if [ -z "$CLIENT_CERT_KEY" ]; then
+            export CLIENT_CERT_KEY="${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"
+        fi
+        if [ -z "$SERVER_CERT_PEM" ]; then
+            export SERVER_CERT_PEM="${ETSI004_CERTS_DIR}/server_cert_qkd_server_alice.pem"
+        fi
+        echo "Using default configuration (respecting Docker Compose overrides)"
+    fi
     
     # QKD specific parameters (original variable names)
-    export KEY_INDEX=0
-    export METADATA_SIZE=1024
-    export QKD_USE_TLS="true"
-    export QKD_CLIENT_VERIFY="true"
+    export KEY_INDEX=${KEY_INDEX:-0}
+    export METADATA_SIZE=${METADATA_SIZE:-1024}
+    export QKD_USE_TLS=${QKD_USE_TLS:-"true"}
+    export QKD_CLIENT_VERIFY=${QKD_CLIENT_VERIFY:-"true"}
     
     # QoS parameters (original variable names - kept for backward compatibility)
     export QOS_KEY_CHUNK_SIZE=${QKD_KEY_CHUNK_SIZE}
     export QOS_MAX_BPS=${QKD_MAX_BPS}
     export QOS_MIN_BPS=${QKD_MIN_BPS}
-    export QOS_JITTER=10
-    export QOS_PRIORITY=0
+    export QOS_JITTER=${QOS_JITTER:-10}
+    export QOS_PRIORITY=${QOS_PRIORITY:-0}
     export QOS_TIMEOUT=${QKD_TIMEOUT}
-    export QOS_TTL=3600
+    export QOS_TTL=${QOS_TTL:-3600}
     
     # Check if certificate files exist
     if [ ! -f "$CLIENT_CERT_PEM" ] || [ ! -f "$CLIENT_CERT_KEY" ] || [ ! -f "$SERVER_CERT_PEM" ]; then
@@ -74,6 +104,9 @@ if [ "${ETSI_API_VERSION}" = "004" ]; then
         echo "  CLIENT_CERT_PEM: $CLIENT_CERT_PEM"
         echo "  CLIENT_CERT_KEY: $CLIENT_CERT_KEY"
         echo "  SERVER_CERT_PEM: $SERVER_CERT_PEM"
+        echo ""
+        echo "Available certificates in ${ETSI004_CERTS_DIR}:"
+        ls -la "${ETSI004_CERTS_DIR}/" 2>/dev/null || echo "  Directory not found or empty"
         echo ""
         echo "If you've placed certificates elsewhere, please set these variables manually."
     else
@@ -148,10 +181,10 @@ elif [ "${QKD_BACKEND}" = "cerberis-xgr" ]; then
 else
     echo "Using default QKD backend (simulated)"
     # Set default environment variables for simulated mode
-        export QKD_MASTER_KME_HOSTNAME="localhost"
-        export QKD_SLAVE_KME_HOSTNAME="localhost"
-        export QKD_MASTER_SAE="sae-1"
-        export QKD_SLAVE_SAE="sae-2"
+    export QKD_MASTER_KME_HOSTNAME=${QKD_MASTER_KME_HOSTNAME:-"localhost"}
+    export QKD_SLAVE_KME_HOSTNAME=${QKD_SLAVE_KME_HOSTNAME:-"localhost"}
+    export QKD_MASTER_SAE=${QKD_MASTER_SAE:-"sae-1"}
+    export QKD_SLAVE_SAE=${QKD_SLAVE_SAE:-"sae-2"}
         
     # For ETSI 004 simulated mode, set required environment variables
     if [ "${ETSI_API_VERSION}" = "004" ]; then

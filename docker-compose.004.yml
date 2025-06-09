@@ -34,7 +34,7 @@ services:
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
       - QKD_BACKEND=${QKD_BACKEND:-python_client}
-      # QKD URI Configuration for flexible adapter
+      # Bob connects to Bob's QKD server
       - QKD_SOURCE_URI=client://qkd_server_alice:25575
       - QKD_DEST_URI=server://qkd_server_bob:25576
       # QKD QoS Configuration
@@ -47,6 +47,15 @@ services:
       - QKD_SLAVE_KME_HOSTNAME=qkd_server_bob
       - QKD_MASTER_SAE=sae-1
       - QKD_SLAVE_SAE=sae-2
+      # Bob's certificate configuration (connects to Bob's server)
+      - CLIENT_CERT_PEM=/qkd_certs/etsi004/client_cert_qkd_server_bob.pem
+      - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_bob.pem
+      - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_bob.pem
+      - QKD_USE_TLS=true
+      - QKD_CLIENT_VERIFY=true
+      # Server connection settings
+      - SERVER_ADDRESS=qkd_server_bob
+      - SERVER_PORT=25576
     volumes:
       - ./bob:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -76,9 +85,9 @@ services:
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
       - QKD_BACKEND=${QKD_BACKEND:-python_client}
-      # QKD URI Configuration for flexible adapter
+      # Alice connects to Alice's QKD server
       - QKD_SOURCE_URI=client://qkd_server_alice:25575
-      - QKD_DEST_URI=server://qkd_server_bob:25576
+      - QKD_DEST_URI=server://qkd_server_alice:25575
       # QKD QoS Configuration
       - QKD_KEY_CHUNK_SIZE=32
       - QKD_TIMEOUT=60000
@@ -89,6 +98,15 @@ services:
       - QKD_SLAVE_KME_HOSTNAME=qkd_server_bob
       - QKD_MASTER_SAE=sae-1
       - QKD_SLAVE_SAE=sae-2
+      # Alice's certificate configuration (connects to Alice's server)
+      - CLIENT_CERT_PEM=/qkd_certs/etsi004/client_cert_qkd_server_alice.pem
+      - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_alice.pem
+      - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_alice.pem
+      - QKD_USE_TLS=true
+      - QKD_CLIENT_VERIFY=true
+      # Server connection settings
+      - SERVER_ADDRESS=qkd_server_alice
+      - SERVER_PORT=25575
     volumes:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
