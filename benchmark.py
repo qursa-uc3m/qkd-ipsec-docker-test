@@ -100,7 +100,7 @@ class QKDTestOrchestrator:
 
         # Define the allowed backends for each ETSI version
         allowed_backends = {
-            "004": ["python-client"],
+            "004": ["python_client"],
             "014": ["qukaydee", "cerberis-xgr", "simulated"],
         }
 
@@ -1095,7 +1095,7 @@ def parse_arguments():
     parser.add_argument(
         "--qkd-backend",
         type=str,
-        choices=["python-client", "qukaydee", "cerberis-xgr", "simulated"],
+        choices=["python_client", "qukaydee", "cerberis-xgr", "simulated"],
         help="QKD backend to use",
     )
     parser.add_argument(

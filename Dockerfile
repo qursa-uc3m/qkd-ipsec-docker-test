@@ -15,6 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV OPENSSL_CONF=/etc/ssl/qkd-kem-openssl.cnf
 ENV OPENSSL_MODULES=/usr/local/lib/ossl-modules
 ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/ossl-modules
+
 # Pass build args to env vars
 ENV QKD_BACKEND=${QKD_BACKEND}
 ENV ACCOUNT_ID=${ACCOUNT_ID}
@@ -45,6 +46,8 @@ RUN apt-get update && apt-get install -y \
     flex \
     bison \
     python3 \
+    python3-dev \
+    libpython3-dev \
     gperf \
     uuid-dev \
     net-tools \
@@ -68,7 +71,6 @@ COPY config/openssl.cnf /etc/ssl/qkd-kem-openssl.cnf
 RUN mkdir -p /qkd_certs
 
 # Copy QKD certificates
-# Using a multi-stage build to conditionally copy
 COPY qkd_certs /qkd_certs
 
 # Clone and build QKD ETSI API if requested
@@ -138,6 +140,9 @@ RUN autoreconf -i && \
 
 # Create symlink for charon daemon
 RUN ln -s /usr/libexec/ipsec/charon /charon
+
+# Preload Python library for ETSI 004 Python bindings
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libpython3.10.so.1.0
 
 # Expose ports
 # 500: IKE
