@@ -23,6 +23,8 @@ services:
     pull_policy: never
     depends_on:
       - strongswan-base
+      - qkd_server_alice
+      - qkd_server_bob
     cap_add:
       - NET_ADMIN
       - SYS_ADMIN
@@ -31,6 +33,20 @@ services:
     tty: true
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
+      - QKD_BACKEND=${QKD_BACKEND:-python_client}
+      # QKD URI Configuration for flexible adapter
+      - QKD_SOURCE_URI=client://qkd_server_alice:25575
+      - QKD_DEST_URI=server://qkd_server_bob:25576
+      # QKD QoS Configuration
+      - QKD_KEY_CHUNK_SIZE=32
+      - QKD_TIMEOUT=60000
+      - QKD_MAX_BPS=40000
+      - QKD_MIN_BPS=5000
+      # Legacy KME settings for backward compatibility
+      - QKD_MASTER_KME_HOSTNAME=qkd_server_alice
+      - QKD_SLAVE_KME_HOSTNAME=qkd_server_bob
+      - QKD_MASTER_SAE=sae-1
+      - QKD_SLAVE_SAE=sae-2
     volumes:
       - ./bob:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -49,6 +65,8 @@ services:
     pull_policy: never
     depends_on:
       - strongswan-base
+      - qkd_server_alice
+      - qkd_server_bob
     cap_add:
       - NET_ADMIN
       - SYS_ADMIN
@@ -57,6 +75,20 @@ services:
     tty: true
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
+      - QKD_BACKEND=${QKD_BACKEND:-python_client}
+      # QKD URI Configuration for flexible adapter
+      - QKD_SOURCE_URI=client://qkd_server_alice:25575
+      - QKD_DEST_URI=server://qkd_server_bob:25576
+      # QKD QoS Configuration
+      - QKD_KEY_CHUNK_SIZE=32
+      - QKD_TIMEOUT=60000
+      - QKD_MAX_BPS=40000
+      - QKD_MIN_BPS=5000
+      # Legacy KME settings for backward compatibility
+      - QKD_MASTER_KME_HOSTNAME=qkd_server_alice
+      - QKD_SLAVE_KME_HOSTNAME=qkd_server_bob
+      - QKD_MASTER_SAE=sae-1
+      - QKD_SLAVE_SAE=sae-2
     volumes:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -132,6 +164,8 @@ services:
       context: ./etsi-qkd-004/keys
     container_name: generate_key_alice
     pull_policy: never
+    depends_on:
+      - qkd_server_alice
     environment:
       - BUFFER_SIZE=1000000
       - BUFFER_PATH=/dev/shm/qkd_buffer
@@ -150,6 +184,8 @@ services:
       context: ./etsi-qkd-004/keys
     container_name: generate_key_bob
     pull_policy: never
+    depends_on:
+      - qkd_server_bob
     environment:
       - BUFFER_SIZE=1000000
       - BUFFER_PATH=/dev/shm/qkd_buffer

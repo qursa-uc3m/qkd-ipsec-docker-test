@@ -21,6 +21,28 @@ fi
 if [ "${ETSI_API_VERSION}" = "004" ]; then
     echo "Setting up ETSI 004 environment:"
     
+    # NEW: QKD URI Configuration for flexible adapter (highest priority)
+    export QKD_SOURCE_URI=${QKD_SOURCE_URI:-"client://qkd_server_alice:25575"}
+    export QKD_DEST_URI=${QKD_DEST_URI:-"server://qkd_server_bob:25576"}
+    
+    # NEW: QKD Host/Port Configuration (fallback for URI construction)
+    export QKD_CLIENT_HOST=${QKD_CLIENT_HOST:-"qkd_server_alice"}
+    export QKD_SERVER_HOST=${QKD_SERVER_HOST:-"qkd_server_bob"}
+    export QKD_CLIENT_PORT=${QKD_CLIENT_PORT:-"25575"}
+    export QKD_SERVER_PORT=${QKD_SERVER_PORT:-"25576"}
+    
+    # NEW: QKD QoS Configuration (for flexible adapter)
+    export QKD_KEY_CHUNK_SIZE=${QKD_KEY_CHUNK_SIZE:-32}
+    export QKD_TIMEOUT=${QKD_TIMEOUT:-60000}
+    export QKD_MAX_BPS=${QKD_MAX_BPS:-40000}
+    export QKD_MIN_BPS=${QKD_MIN_BPS:-5000}
+    
+    # NEW: Legacy KME settings for backward compatibility
+    export QKD_MASTER_KME_HOSTNAME=${QKD_MASTER_KME_HOSTNAME:-"qkd_server_alice"}
+    export QKD_SLAVE_KME_HOSTNAME=${QKD_SLAVE_KME_HOSTNAME:-"qkd_server_bob"}
+    export QKD_MASTER_SAE=${QKD_MASTER_SAE:-"sae-1"}
+    export QKD_SLAVE_SAE=${QKD_SLAVE_SAE:-"sae-2"}
+    
     # Server connection settings for ETSI 004 (original variable names)
     export SERVER_ADDRESS=${SERVER_ADDRESS:-"qkd_server_bob"}
     export SERVER_PORT=${SERVER_PORT:-25576}
@@ -37,13 +59,13 @@ if [ "${ETSI_API_VERSION}" = "004" ]; then
     export QKD_USE_TLS="true"
     export QKD_CLIENT_VERIFY="true"
     
-    # QoS parameters (original variable names)
-    export QOS_KEY_CHUNK_SIZE=32
-    export QOS_MAX_BPS=40000
-    export QOS_MIN_BPS=5000
+    # QoS parameters (original variable names - kept for backward compatibility)
+    export QOS_KEY_CHUNK_SIZE=${QKD_KEY_CHUNK_SIZE}
+    export QOS_MAX_BPS=${QKD_MAX_BPS}
+    export QOS_MIN_BPS=${QKD_MIN_BPS}
     export QOS_JITTER=10
     export QOS_PRIORITY=0
-    export QOS_TIMEOUT=5000
+    export QOS_TIMEOUT=${QKD_TIMEOUT}
     export QOS_TTL=3600
     
     # Check if certificate files exist
@@ -58,6 +80,12 @@ if [ "${ETSI_API_VERSION}" = "004" ]; then
         echo "Certificate paths set successfully."
     fi
     
+    echo "QKD URI Configuration:"
+    echo "  Source URI: $QKD_SOURCE_URI"
+    echo "  Destination URI: $QKD_DEST_URI"
+    echo "  Client Host: $QKD_CLIENT_HOST:$QKD_CLIENT_PORT"
+    echo "  Server Host: $QKD_SERVER_HOST:$QKD_SERVER_PORT"
+    echo ""
     echo "QKD environment variables set for connecting to $SERVER_ADDRESS:$SERVER_PORT"
     
 elif [ "${QKD_BACKEND}" = "qukaydee" ]; then
@@ -120,11 +148,11 @@ elif [ "${QKD_BACKEND}" = "cerberis-xgr" ]; then
 else
     echo "Using default QKD backend (simulated)"
     # Set default environment variables for simulated mode
-    export QKD_MASTER_KME_HOSTNAME="localhost"
-    export QKD_SLAVE_KME_HOSTNAME="localhost"
-    export QKD_MASTER_SAE="sae-1"
-    export QKD_SLAVE_SAE="sae-2"
-    
+        export QKD_MASTER_KME_HOSTNAME="localhost"
+        export QKD_SLAVE_KME_HOSTNAME="localhost"
+        export QKD_MASTER_SAE="sae-1"
+        export QKD_SLAVE_SAE="sae-2"
+        
     # For ETSI 004 simulated mode, set required environment variables
     if [ "${ETSI_API_VERSION}" = "004" ]; then
         export SERVER_ADDRESS="localhost"
