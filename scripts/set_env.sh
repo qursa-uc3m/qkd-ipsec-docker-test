@@ -13,58 +13,53 @@ ETSI_API_VERSION=${ETSI_API_VERSION:-014}
 if [ "${ETSI_API_VERSION}" = "004" ]; then
     export CPPFLAGS="-DETSI_004_API"
     export CFLAGS="-DETSI_004_API"
+    echo "Setting up ETSI 004 environment with compilation flags"
 else
     export CPPFLAGS="-DETSI_014_API"
     export CFLAGS="-DETSI_014_API"
+    echo "Setting up ETSI 014 environment with compilation flags"
 fi
 
 if [ "${ETSI_API_VERSION}" = "004" ]; then
-    echo "Setting up ETSI 004 environment:"
-    
-    # Check required URIs are set by Docker Compose
     if [ -z "$QKD_SOURCE_URI" ] || [ -z "$QKD_DEST_URI" ]; then
         echo "ERROR: QKD_SOURCE_URI and QKD_DEST_URI must be set for ETSI 004"
+        echo "These should be set in docker-compose.yml"
         exit 1
     fi
     
-    # Certificate configuration
-    # Only set defaults if not already provided by Docker Compose
-    CONTAINER_NAME=$(hostname)
-    
-    if [ "$CONTAINER_NAME" = "alice" ]; then
-        export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"}
-        export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"}
-        export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_alice.pem"}
-        echo "Configured as Alice"
-    elif [ "$CONTAINER_NAME" = "bob" ]; then
-        export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_bob.pem"}
-        export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_bob.pem"}
-        export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_bob.pem"}
-        echo "Configured as Bob"
+    # Detect container role from existing environment
+    if [[ "$QKD_DEST_URI" == *"qkd_server_alice"* ]]; then
+        CONTAINER_ROLE="alice"
+    elif [[ "$QKD_DEST_URI" == *"qkd_server_bob"* ]]; then
+        CONTAINER_ROLE="bob"
     else
-        echo "WARNING: Unknown container name '$CONTAINER_NAME', using Alice defaults"
-        export CLIENT_CERT_PEM=${CLIENT_CERT_PEM:-"${ETSI004_CERTS_DIR}/client_cert_qkd_server_alice.pem"}
-        export CLIENT_CERT_KEY=${CLIENT_CERT_KEY:-"${ETSI004_CERTS_DIR}/client_key_qkd_server_alice.pem"}
-        export SERVER_CERT_PEM=${SERVER_CERT_PEM:-"${ETSI004_CERTS_DIR}/server_cert_qkd_server_alice.pem"}
+        echo "ERROR: Cannot determine container role from QKD_DEST_URI: $QKD_DEST_URI"
+        exit 1
+    fi
+    
+    # Validate that certificate paths are set (by Docker Compose)
+    if [ -z "$CLIENT_CERT_PEM" ] || [ -z "$CLIENT_CERT_KEY" ] || [ -z "$SERVER_CERT_PEM" ]; then
+        echo "ERROR: Certificate environment variables not set!"
+        echo "These should be set in docker-compose.yml:"
+        echo "  CLIENT_CERT_PEM, CLIENT_CERT_KEY, SERVER_CERT_PEM"
+        exit 1
     fi
     
     # Check if certificate files exist
     if [ ! -f "$CLIENT_CERT_PEM" ] || [ ! -f "$CLIENT_CERT_KEY" ] || [ ! -f "$SERVER_CERT_PEM" ]; then
-        echo "WARNING: Some certificate files were not found:"
+        echo "ERROR: Certificate files not found!"
         echo "  CLIENT_CERT_PEM: $CLIENT_CERT_PEM"
         echo "  CLIENT_CERT_KEY: $CLIENT_CERT_KEY"
         echo "  SERVER_CERT_PEM: $SERVER_CERT_PEM"
-        echo ""
-        echo "Available certificates in ${ETSI004_CERTS_DIR}:"
-        ls -la "${ETSI004_CERTS_DIR}/" 2>/dev/null || echo "  Directory not found or empty"
-    else
-        echo "Certificate paths set successfully"
+        exit 1
     fi
     
-    echo "ETSI 004 Configuration:"
+    echo "ETSI 004 Configuration (from Docker Compose):"
+    echo "  Container Role: $CONTAINER_ROLE"
     echo "  Source URI: $QKD_SOURCE_URI"
     echo "  Destination URI: $QKD_DEST_URI"
     echo "  Backend: ${QKD_BACKEND:-python_client}"
+    echo "  Certificates validated successfully"
     
 elif [ "${QKD_BACKEND}" = "qukaydee" ]; then
     echo "Setting up QuKayDee environment (ETSI 014):"
