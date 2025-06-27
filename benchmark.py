@@ -13,6 +13,8 @@ import argparse
 import datetime
 import json
 import os
+import re
+import socket
 import subprocess
 import sys
 import time
@@ -43,17 +45,34 @@ class QKDTestOrchestrator:
         # Validate ETSI API version and backend compatibility
         self._validate_etsi_backend_compatibility()
 
-        # Set IP addresses from config or use defaults
-        self.alice_ip = (
-            self.config.get("docker", {})
-            .get("network", {})
-            .get("alice_ip", DEFAULT_ALICE_IP)
-        )
-        self.bob_ip = (
-            self.config.get("docker", {})
-            .get("network", {})
-            .get("bob_ip", DEFAULT_BOB_IP)
-        )
+        # Extract network mode and IPs from new config format
+        network_config = self.config.get("docker", {}).get("network", {})
+        self.network_mode = network_config.get("mode", "single-machine")
+
+        # Extract Alice and Bob configuration
+        alice_config = network_config.get("alice", {})
+        bob_config = network_config.get("bob", {})
+
+        # Set IP addresses from new config structure
+        self.alice_ip = alice_config.get("container_ip", DEFAULT_ALICE_IP)
+        self.bob_ip = bob_config.get("container_ip", DEFAULT_BOB_IP)
+        self.alice_local_ip = alice_config.get("local_ip", "auto")
+        self.bob_local_ip = bob_config.get("local_ip", "auto")
+        self.alice_qkd_port = alice_config.get("qkd_server_port", 25575)
+        self.bob_qkd_port = bob_config.get("qkd_server_port", 25576)
+        self.coordination_port = network_config.get("coordination_port", 8080)
+
+        # Initialize role-specific attributes
+        self.role = getattr(cli_args, "role", "both")
+        self.remote_ip = getattr(cli_args, "remote_ip", None)
+        self.local_ip = getattr(cli_args, "local_ip", None)
+
+        # If CLI args don't specify local_ip, use config values
+        if not self.local_ip:
+            if self.role == "alice":
+                self.local_ip = self.alice_local_ip
+            elif self.role == "bob":
+                self.local_ip = self.bob_local_ip
 
         # Get build settings with defaults
         self.build = self.config.get("docker", {}).get("build", {}).get("build", False)
@@ -64,6 +83,18 @@ class QKDTestOrchestrator:
         # Override config with CLI args if provided
         if cli_args:
             self._apply_cli_overrides(cli_args)
+
+        # Validate distributed mode configuration
+        self._validate_distributed_config()
+
+        # Auto-detect local IP if needed
+        if self.role in ["alice", "bob"] and (
+            not self.local_ip or self.local_ip == "auto"
+        ):
+            self.local_ip = self._get_local_ip()
+
+        # Select appropriate compose file based on mode and role
+        self._select_compose_file()
 
         # Prepare output directories
         self.dirs = self._setup_directories()
@@ -129,6 +160,21 @@ class QKDTestOrchestrator:
             )
             sys.exit(1)
 
+    def _validate_distributed_config(self):
+        """Validate distributed mode configuration."""
+        # Automatically switch to distributed mode when role is specified
+        if self.role in ["alice", "bob"]:
+            print(
+                f"Role '{self.role}' specified - automatically switching to distributed mode"
+            )
+            self.network_mode = "distributed"
+
+        # If network mode is distributed or role is specified, validate
+        if self.network_mode == "distributed" or self.role in ["alice", "bob"]:
+            if self.role in ["alice", "bob"] and not self.remote_ip:
+                print("Error: --remote-ip is required when running in distributed mode")
+                sys.exit(1)
+
     def _apply_cli_overrides(self, args):
         """Apply command line argument overrides to configuration."""
         etsi_version_changed = False
@@ -180,22 +226,28 @@ class QKDTestOrchestrator:
         if args.no_analyze:
             self.config["test"]["analyze_results"] = False
 
-        # IP address overrides
+        # IP address overrides - update the nested structure
         if args.alice_ip is not None:
-            self.alice_ip = args.alice_ip
             if "docker" not in self.config:
                 self.config["docker"] = {}
             if "network" not in self.config["docker"]:
                 self.config["docker"]["network"] = {}
-            self.config["docker"]["network"]["alice_ip"] = args.alice_ip
+            if "alice" not in self.config["docker"]["network"]:
+                self.config["docker"]["network"]["alice"] = {}
+
+            self.config["docker"]["network"]["alice"]["container_ip"] = args.alice_ip
+            self.alice_ip = args.alice_ip
 
         if args.bob_ip is not None:
-            self.bob_ip = args.bob_ip
             if "docker" not in self.config:
                 self.config["docker"] = {}
             if "network" not in self.config["docker"]:
                 self.config["docker"]["network"] = {}
-            self.config["docker"]["network"]["bob_ip"] = args.bob_ip
+            if "bob" not in self.config["docker"]["network"]:
+                self.config["docker"]["network"]["bob"] = {}
+
+            self.config["docker"]["network"]["bob"]["container_ip"] = args.bob_ip
+            self.bob_ip = args.bob_ip
 
     def _setup_directories(self):
         """Set up the directory structure for test outputs and backup configuration files."""
@@ -236,6 +288,25 @@ class QKDTestOrchestrator:
         self._backup_config_files(dirs["output_dir"])
 
         return dirs
+
+    def _select_compose_file(self):
+        """Select the appropriate Docker Compose file based on mode and role."""
+        compose_files = self.config.get("docker", {}).get("compose_files", {})
+
+        if self.network_mode == "distributed" or self.role in ["alice", "bob"]:
+            # Use distributed compose file
+            self.compose_file = compose_files.get(
+                "distributed", "docker-compose.004.distr.yml"
+            )
+        else:
+            # Use single machine compose file
+            self.compose_file = compose_files.get(
+                "single_machine", "docker-compose.004.yml"
+            )
+
+        print(
+            f"Using compose file: {self.compose_file} for mode: {self.network_mode}, role: {self.role}"
+        )
 
     def _backup_config_files(self, output_dir):
         """Backup configuration files to the results directory."""
@@ -287,61 +358,89 @@ class QKDTestOrchestrator:
                 "packet_loss_percent": network_config["packet_loss"],
                 "duration": network_config["duration"],
             },
-            "container_network": {"alice_ip": self.alice_ip, "bob_ip": self.bob_ip},
+            "network_mode": self.network_mode,
+            "container_network": {
+                "alice": {
+                    "container_ip": self.alice_ip,
+                    "local_ip": self.alice_local_ip,
+                    "qkd_server_port": self.alice_qkd_port,
+                },
+                "bob": {
+                    "container_ip": self.bob_ip,
+                    "local_ip": self.bob_local_ip,
+                    "qkd_server_port": self.bob_qkd_port,
+                },
+                "coordination_port": self.coordination_port,
+            },
+            "runtime_config": {
+                "role": self.role,
+                "remote_ip": self.remote_ip,
+                "local_ip": self.local_ip,
+            },
         }
 
         with open(f"{output_dir}/test_config.json", "w") as f:
             json.dump(config_json, f, indent=2)
 
     def _get_container_status(self):
-        """Check the status of the Alice and Bob containers."""
+        """Check the status of containers based on role."""
         try:
-            alice_container = self.docker_client.containers.get("alice")
-            bob_container = self.docker_client.containers.get("bob")
+            containers_to_check = []
 
-            if (
-                alice_container.status == "running"
-                and bob_container.status == "running"
-            ):
-                return "running", (alice_container, bob_container)
+            if self.role in ["alice", "both"]:
+                containers_to_check.append("alice")
+            if self.role in ["bob", "both"]:
+                containers_to_check.append("bob")
+
+            running_containers = []
+            existing_containers = []
+
+            for container_name in containers_to_check:
+                try:
+                    container = self.docker_client.containers.get(container_name)
+                    existing_containers.append(container)
+                    if container.status == "running":
+                        running_containers.append(container)
+                except docker.errors.NotFound:
+                    return "not_found", None
+
+            if len(running_containers) == len(containers_to_check):
+                return "running", tuple(existing_containers)
+            elif len(existing_containers) == len(containers_to_check):
+                return "exists", tuple(existing_containers)
             else:
-                return "exists", (alice_container, bob_container)
+                return "not_found", None
 
-        except docker.errors.NotFound:
+        except Exception:
             return "not_found", None
 
     def _start_existing_containers(self, containers):
         """Start existing containers that are not running."""
-        alice_container, bob_container = containers
-
         try:
-            print(
-                f"Container status: Alice: {alice_container.status}, Bob: {bob_container.status}"
-            )
             print("Containers exist but are not running. Starting containers...")
 
-            if alice_container.status != "running":
-                alice_container.start()
-            if bob_container.status != "running":
-                bob_container.start()
+            for container in containers:
+                if container.status != "running":
+                    print(f"Starting {container.name}...")
+                    container.start()
 
             print("Waiting for containers to start...")
             time.sleep(5)
 
             # Verify containers are running now
-            alice_container.reload()
-            bob_container.reload()
+            all_running = True
+            for container in containers:
+                container.reload()
+                if container.status != "running":
+                    print(
+                        f"Failed to start {container.name}. Status: {container.status}"
+                    )
+                    all_running = False
 
-            if (
-                alice_container.status == "running"
-                and bob_container.status == "running"
-            ):
+            if all_running:
                 print("Containers started successfully")
                 return True
             else:
-                print(
-                    f"Failed to start containers. Current status: Alice: {alice_container.status}, Bob: {bob_container.status}"
-                )
                 return False
 
         except Exception as e:
@@ -375,7 +474,7 @@ class QKDTestOrchestrator:
             status, containers = self._get_container_status()
 
             if status == "running":
-                print("Docker containers are running")
+                print(f"Docker containers are running for role: {self.role}")
                 return True
 
             elif status == "exists":
@@ -393,7 +492,7 @@ class QKDTestOrchestrator:
         """Try to start containers or build them if needed."""
         try:
             # Try docker-compose up to start existing containers
-            compose_file = self.config["docker"]["compose_file"]
+            compose_file = self.compose_file  # Use the selected compose file
             env = self._get_docker_env()
 
             print("Running docker-compose up to see if containers can be started...")
@@ -438,13 +537,13 @@ class QKDTestOrchestrator:
         print(f"  QKD_BACKEND={self.config['docker']['qkd']['backend']} \\")
         if self.config["docker"]["qkd"]["account_id"]:
             print(f"  ACCOUNT_ID={self.config['docker']['qkd']['account_id']} \\")
-        print(f"  docker-compose -f {self.config['docker']['compose_file']} up -d")
+        print(f"  docker-compose -f {self.compose_file} up -d")
 
         print("\nThen run this script again after containers are running.")
 
     def _get_docker_env(self):
         """Get environment variables for Docker commands."""
-        return {
+        base_env = {
             "ETSI_API_VERSION": self.config["docker"]["qkd"]["etsi_api_version"],
             "QKD_BACKEND": self.config["docker"]["qkd"]["backend"],
             "QKD_INITIATION_MODE": self.config["docker"]["qkd"].get(
@@ -458,11 +557,94 @@ class QKDTestOrchestrator:
             "BUILD_QKD_KEM": str(
                 self.config["docker"]["build"]["build_qkd_kem"]
             ).lower(),
+            "BENCHMARK_ROLE": self.role,
+            "COORDINATION_PORT": str(self.coordination_port),
+            # Always provide these IPs for consistent networking
+            "ALICE_IP": self.alice_ip,
+            "BOB_IP": self.bob_ip,
+            "ALICE_QKD_IP": "172.30.0.10",
+            "BOB_QKD_IP": "172.30.0.11",
+            "ALICE_KEYGEN_IP": "172.30.0.12",
+            "BOB_KEYGEN_IP": "172.30.0.13",
+            "BOB_INTRANET_IP": "172.31.0.2",
         }
+
+        # Configure based on role and network mode
+        if self.role == "alice":
+            base_env.update(
+                {
+                    "NETWORK_MODE": (
+                        "host" if self.network_mode == "distributed" else "bridge"
+                    ),
+                    "REMOTE_BOB_IP": self.remote_ip or self.bob_ip,
+                    "LOCAL_IP": self.local_ip or "auto",
+                    # Use default ports in host mode, different ports in bridge mode
+                    "ALICE_IKE_PORT": (
+                        "500" if self.network_mode == "distributed" else "501"
+                    ),
+                    "ALICE_NATT_PORT": (
+                        "4500" if self.network_mode == "distributed" else "4501"
+                    ),
+                    "ALICE_COORD_PORT": str(self.coordination_port),
+                    "ALICE_QKD_PORT": str(self.alice_qkd_port),
+                    "BOB_KEYGEN_PORT": "5000",
+                    # Bob settings for single machine mode
+                    "BOB_IKE_PORT": "500",
+                    "BOB_NATT_PORT": "4500",
+                    "BOB_COORD_PORT": str(
+                        self.coordination_port
+                        if self.network_mode == "distributed"
+                        else self.coordination_port
+                    ),
+                    "BOB_QKD_PORT": str(self.bob_qkd_port),
+                }
+            )
+        elif self.role == "bob":
+            base_env.update(
+                {
+                    "NETWORK_MODE": (
+                        "host" if self.network_mode == "distributed" else "bridge"
+                    ),
+                    "REMOTE_ALICE_IP": self.remote_ip or self.alice_ip,
+                    "LOCAL_IP": self.local_ip or "auto",
+                    # Use default ports in host mode
+                    "BOB_IKE_PORT": "500",
+                    "BOB_NATT_PORT": "4500",
+                    "BOB_COORD_PORT": str(self.coordination_port),
+                    "BOB_QKD_PORT": str(self.bob_qkd_port),
+                    "BOB_KEYGEN_PORT": "5000",
+                    # Alice settings for cross-reference
+                    "ALICE_IKE_PORT": "501",
+                    "ALICE_NATT_PORT": "4501",
+                    "ALICE_COORD_PORT": str(self.coordination_port + 1),
+                    "ALICE_QKD_PORT": str(self.alice_qkd_port),
+                }
+            )
+        else:  # both (single machine)
+            base_env.update(
+                {
+                    "NETWORK_MODE": "bridge",  # Always use bridge for single machine
+                    # Use different ports to avoid conflicts in single machine
+                    "ALICE_IKE_PORT": "501",
+                    "ALICE_NATT_PORT": "4501",
+                    "ALICE_COORD_PORT": str(self.coordination_port + 1),  # 8081
+                    "BOB_IKE_PORT": "500",
+                    "BOB_NATT_PORT": "4500",
+                    "BOB_COORD_PORT": str(self.coordination_port),  # 8080
+                    "ALICE_QKD_PORT": str(self.alice_qkd_port),
+                    "BOB_QKD_PORT": str(self.bob_qkd_port),
+                    "BOB_KEYGEN_PORT": "5000",
+                    # Set remote IPs to container IPs for single machine
+                    "REMOTE_ALICE_IP": self.alice_ip,
+                    "REMOTE_BOB_IP": self.bob_ip,
+                }
+            )
+
+        return base_env
 
     def setup_environment(self, build_only=False, detached=True):
         """Build and start Docker containers."""
-        compose_file = self.config["docker"]["compose_file"]
+        compose_file = self.compose_file  # Use the selected compose file
 
         # Clean up existing containers
         self._cleanup_existing_containers(compose_file)
@@ -485,19 +667,56 @@ class QKDTestOrchestrator:
             return True
 
     def _cleanup_existing_containers(self, compose_file):
-        """Clean up existing containers."""
+        """Clean up existing containers based on role."""
         print("Cleaning up existing containers...")
         try:
-            # Using docker-compose down with volumes to ensure clean state
-            cleanup_cmd = [
-                "docker-compose",
-                "-f",
-                compose_file,
-                "down",
-                "--volumes",
-                "--remove-orphans",
-            ]
-            self._run_docker_command(cleanup_cmd, check=False)
+            if self.role == "alice":
+                # Only stop Alice-related containers
+                containers_to_stop = ["alice", "qkd_server_alice", "generate_key_alice"]
+                for container in containers_to_stop:
+                    try:
+                        subprocess.run(
+                            ["docker", "stop", container],
+                            check=False,
+                            capture_output=True,
+                        )
+                        subprocess.run(
+                            ["docker", "rm", container],
+                            check=False,
+                            capture_output=True,
+                        )
+                        print(f"Stopped and removed {container}")
+                    except:
+                        pass
+            elif self.role == "bob":
+                # Only stop Bob-related containers
+                containers_to_stop = ["bob", "qkd_server_bob", "generate_key_bob"]
+                for container in containers_to_stop:
+                    try:
+                        subprocess.run(
+                            ["docker", "stop", container],
+                            check=False,
+                            capture_output=True,
+                        )
+                        subprocess.run(
+                            ["docker", "rm", container],
+                            check=False,
+                            capture_output=True,
+                        )
+                        print(f"Stopped and removed {container}")
+                    except:
+                        pass
+            else:
+                # For "both", clean up everything
+                cleanup_cmd = [
+                    "docker-compose",
+                    "-f",
+                    compose_file,
+                    "down",
+                    "--volumes",
+                    "--remove-orphans",
+                ]
+                self._run_docker_command(cleanup_cmd, check=False)
         except Exception as e:
             print(f"Warning during cleanup: {e}")
 
@@ -540,14 +759,30 @@ class QKDTestOrchestrator:
             return False
 
     def _start_containers(self, compose_file, env, detached):
-        """Start Docker containers."""
-        print("Starting containers in detached mode...")
-        # Always force detached mode for container startup
+        """Start Docker containers with role-specific profiles."""
+        print("Starting containers...")
+
+        # Base command
         up_cmd = ["docker-compose", "-f", compose_file, "up", "-d"]
+
+        # Add profile-specific services based on role
+        if self.role == "alice":
+            up_cmd.extend(
+                ["strongswan-base", "alice", "qkd_server_alice", "generate_key_alice"]
+            )
+            print("Starting Alice-related containers only...")
+        elif self.role == "bob":
+            up_cmd.extend(
+                ["strongswan-base", "bob", "qkd_server_bob", "generate_key_bob"]
+            )
+            print("Starting Bob-related containers only...")
+        else:  # both
+            print("Starting all containers...")
+            # For 'both', start all services (default behavior)
 
         try:
             self._run_docker_command(up_cmd, env=env)
-            print("Containers started in detached mode.")
+            print(f"Containers started for role: {self.role}")
 
             # Verify that containers are running
             self._verify_containers_running(compose_file, env)
@@ -557,20 +792,20 @@ class QKDTestOrchestrator:
             return False
 
     def _verify_containers_running(self, compose_file, env):
-        """Verify that containers are running."""
+        """Verify that containers are running based on role."""
         ps_cmd = ["docker-compose", "-f", compose_file, "ps"]
         result = self._run_docker_command(ps_cmd, env=env, capture_output=True)
 
-        # Actually check the output for container status
-        if "alice" not in result.stdout or "bob" not in result.stdout:
-            print("Warning: Containers may not be running correctly.")
-
-        # Check actual container status using Docker API
-        status, _ = self._get_container_status()
-        if status != "running":
-            print(
-                "Warning: Container status check indicates containers are not running properly."
-            )
+        # Check for role-specific containers
+        if self.role == "alice":
+            if "alice" not in result.stdout:
+                print("Warning: Alice container may not be running correctly.")
+        elif self.role == "bob":
+            if "bob" not in result.stdout:
+                print("Warning: Bob container may not be running correctly.")
+        else:  # both
+            if "alice" not in result.stdout or "bob" not in result.stdout:
+                print("Warning: Containers may not be running correctly.")
 
     def _cleanup_pumba_containers(self):
         """Stop all Pumba containers."""
@@ -650,6 +885,16 @@ class QKDTestOrchestrator:
             # No existing Pumba containers found
             pass
 
+    def _get_local_ip(self) -> str:
+        """Auto-detect local IP address."""
+        try:
+            # Connect to a remote address to determine the local IP
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+
     def _discover_interface(self, container_name, target_ip):
         """Discover which network interface a container uses to reach a target IP."""
         try:
@@ -657,9 +902,6 @@ class QKDTestOrchestrator:
                 container_name, f"ip route get {target_ip}"
             )
             output = result.output.decode().strip()
-
-            # Extract interface name using regex
-            import re
 
             match = re.search(r"dev\s+(\S+)", output)
             if match:
@@ -673,7 +915,7 @@ class QKDTestOrchestrator:
             return None
 
     def apply_network_conditions(self):
-        """Apply network conditions using Pumba with automatic interface discovery."""
+        """Apply network conditions using Pumba with unified logic for both single and distributed modes."""
         if not self.config["test"]["network"]["apply"]:
             print("Network conditions disabled. Skipping...")
             return
@@ -688,24 +930,39 @@ class QKDTestOrchestrator:
         print(f"  - Latency: {latency}ms with {jitter}ms jitter")
         print(f"  - Packet loss: {packet_loss}%")
         print(f"  - Duration: {duration}")
-        print(
-            f"  - Only affecting traffic between Alice ({self.alice_ip}) and Bob ({self.bob_ip})"
-        )
+        print(f"  - Network mode: {self.network_mode}")
 
         # Clear any existing Pumba containers from previous runs
         self._cleanup_pumba_containers()
 
-        # Discover the correct network interfaces
-        alice_interface = self._discover_interface("alice", self.bob_ip)
-        bob_interface = self._discover_interface("bob", self.alice_ip)
+        # Determine which containers and targets to apply conditions to
+        containers_and_targets = []
 
-        if not alice_interface or not bob_interface:
-            print("ERROR: Could not determine network interfaces!")
-            raise RuntimeError("Interface discovery failed")
+        if self.network_mode == "distributed":
+            # Distributed mode: only apply to local container targeting remote IP
+            if self.role == "alice":
+                containers_and_targets = [("alice", self.remote_ip)]
+                print(
+                    f"  - Alice applying conditions targeting Bob at {self.remote_ip}"
+                )
+            elif self.role == "bob":
+                containers_and_targets = [("bob", self.remote_ip)]
+                print(
+                    f"  - Bob applying conditions targeting Alice at {self.remote_ip}"
+                )
+            else:
+                print(
+                    "Warning: Distributed network conditions require --role alice or --role bob"
+                )
+                return
+        else:
+            # Single machine mode: apply to both containers targeting each other
+            containers_and_targets = [("alice", self.bob_ip), ("bob", self.alice_ip)]
+            print(
+                f"  - Single machine mode: Alice targeting {self.bob_ip}, Bob targeting {self.alice_ip}"
+            )
 
-        print(f"  - Alice communicates with Bob via interface: {alice_interface}")
-        print(f"  - Bob communicates with Alice via interface: {bob_interface}")
-
+        # Apply network conditions to each container-target pair
         pumba_base = [
             "docker",
             "run",
@@ -722,117 +979,70 @@ class QKDTestOrchestrator:
         ]
 
         try:
-            if latency > 0:
-                # Apply latency to Alice's outgoing traffic to Bob
-                latency_alice = pumba_base + [
-                    "--interface",
-                    alice_interface,
-                    "--target",
-                    self.bob_ip,
-                    "delay",
-                    "--time",
-                    str(latency),
-                    "--jitter",
-                    str(jitter),
-                    "--distribution",
-                    "normal",
-                    "alice",
-                ]
-                result = subprocess.run(
-                    latency_alice, check=True, capture_output=True, text=True
-                )
-                alice_container_id = result.stdout.strip()
-                if alice_container_id:
-                    self.pumba_containers.append(alice_container_id)
+            for container_name, target_ip in containers_and_targets:
+                # Discover the correct network interface
+                interface = self._discover_interface(container_name, target_ip)
+                if not interface:
                     print(
-                        f"Started Pumba container for Alice latency: {alice_container_id[:12]}"
+                        f"ERROR: Could not determine network interface for {container_name} to reach {target_ip}!"
                     )
+                    raise RuntimeError("Interface discovery failed")
 
-                # Apply latency to Bob's outgoing traffic to Alice
-                latency_bob = pumba_base + [
-                    "--interface",
-                    bob_interface,
-                    "--target",
-                    self.alice_ip,
-                    "delay",
-                    "--time",
-                    str(latency),
-                    "--jitter",
-                    str(jitter),
-                    "--distribution",
-                    "normal",
-                    "bob",
-                ]
-                result = subprocess.run(
-                    latency_bob, check=True, capture_output=True, text=True
-                )
-                bob_container_id = result.stdout.strip()
-                if bob_container_id:
-                    self.pumba_containers.append(bob_container_id)
-                    print(
-                        f"Started Pumba container for Bob latency: {bob_container_id[:12]}"
-                    )
-            else:
                 print(
-                    "No latency specified (latency = 0), skipping latency application"
+                    f"  - {container_name} communicates with {target_ip} via interface: {interface}"
                 )
 
-            # Apply packet loss if specified
-            if packet_loss > 0:
-                print(f"Applying {packet_loss}% packet loss...")
-
-                # Apply packet loss to Alice's outgoing traffic to Bob
-                loss_alice = pumba_base + [
-                    "--interface",
-                    alice_interface,
-                    "--target",
-                    self.bob_ip,
-                    "loss",
-                    "--percent",
-                    str(packet_loss),
-                    "--correlation",
-                    "20",
-                    "alice",
-                ]
-                result = subprocess.run(
-                    loss_alice, check=True, capture_output=True, text=True
-                )
-                alice_loss_id = result.stdout.strip()
-                if alice_loss_id:
-                    self.pumba_containers.append(alice_loss_id)
-                    print(
-                        f"Started Pumba container for Alice packet loss: {alice_loss_id[:12]}"
+                # Apply latency if specified
+                if latency > 0:
+                    latency_cmd = pumba_base + [
+                        "--interface",
+                        interface,
+                        "--target",
+                        target_ip,
+                        "delay",
+                        "--time",
+                        str(latency),
+                        "--jitter",
+                        str(jitter),
+                        "--distribution",
+                        "normal",
+                        container_name,
+                    ]
+                    result = subprocess.run(
+                        latency_cmd, check=True, capture_output=True, text=True
                     )
+                    container_id = result.stdout.strip()
+                    if container_id:
+                        self.pumba_containers.append(container_id)
+                        print(
+                            f"Started Pumba container for {container_name} latency: {container_id[:12]}"
+                        )
 
-                # Apply packet loss to Bob's outgoing traffic to Alice
-                loss_bob = pumba_base + [
-                    "--interface",
-                    bob_interface,
-                    "--target",
-                    self.alice_ip,
-                    "loss",
-                    "--percent",
-                    str(packet_loss),
-                    "--correlation",
-                    "20",
-                    "bob",
-                ]
-                result = subprocess.run(
-                    loss_bob, check=True, capture_output=True, text=True
-                )
-                bob_loss_id = result.stdout.strip()
-                if bob_loss_id:
-                    self.pumba_containers.append(bob_loss_id)
-                    print(
-                        f"Started Pumba container for Bob packet loss: {bob_loss_id[:12]}"
+                # Apply packet loss if specified
+                if packet_loss > 0:
+                    loss_cmd = pumba_base + [
+                        "--interface",
+                        interface,
+                        "--target",
+                        target_ip,
+                        "loss",
+                        "--percent",
+                        str(packet_loss),
+                        "--correlation",
+                        "20",
+                        container_name,
+                    ]
+                    result = subprocess.run(
+                        loss_cmd, check=True, capture_output=True, text=True
                     )
-            else:
-                print(
-                    "No packet loss specified (packet_loss = 0), skipping packet loss application"
-                )
+                    container_id = result.stdout.strip()
+                    if container_id:
+                        self.pumba_containers.append(container_id)
+                        print(
+                            f"Started Pumba container for {container_name} packet loss: {container_id[:12]}"
+                        )
 
             print(f"Total Pumba containers started: {len(self.pumba_containers)}")
-            # Only wait if we actually started some containers
             if self.pumba_containers:
                 print("Waiting for network conditions to be applied...")
                 time.sleep(5)
@@ -881,43 +1091,108 @@ class QKDTestOrchestrator:
                 self._cleanup_pumba_containers()
 
     def _prepare_output_directory(self):
-        """Create and prepare the output directory in the Docker container."""
+        """Create and prepare the output directory in the appropriate Docker container."""
         print(f"Creating output directory: {self.dirs['docker_output_dir']}")
 
-        # Create directory and set permissions in Alice container
+        # Determine which container to use for directory creation
+        if self.role == "alice" or self.role == "both":
+            container_name = "alice"
+        else:  # bob
+            container_name = "bob"
+
+        # Create directory and set permissions in the chosen container
         self._execute_container_command(
-            "alice", f"mkdir -p {self.dirs['docker_output_dir']}"
+            container_name, f"mkdir -p {self.dirs['docker_output_dir']}"
         )
         self._execute_container_command(
-            "alice", f"chmod -R 777 {self.dirs['docker_output_dir']}"
+            container_name, f"chmod -R 777 {self.dirs['docker_output_dir']}"
         )
 
     def _run_test_scripts(self):
-        """Run the test scripts on Alice and Bob containers."""
+        """Run the test scripts based on role with proper coordination."""
         iterations = self.config["test"]["iterations"]
         print(f"Running tests with {iterations} iterations...")
         print(f"Results will be stored in {self.dirs['output_dir']}...")
 
-        # Start Bob's test script in the background
-        print("Starting Bob's test script in the background...")
-        bob_cmd = (
-            f"bash -c 'export IS_TLS_SERVER=1 && source /set_env.sh && "
-            f"python3 /etc/swanctl/bob_tests.py > {self.dirs['docker_output_dir']}/bob_log.txt 2>&1'"
-        )
+        if self.role == "both":
+            # Single machine mode - run both Alice and Bob
+            print("Starting Bob's test script in the background...")
+            bob_cmd = (
+                f"bash -c 'export IS_TLS_SERVER=1 && source /set_env.sh && "
+                f"python3 /etc/swanctl/bob_tests.py > {self.dirs['docker_output_dir']}/bob_log.txt 2>&1'"
+            )
+            self._execute_container_command("bob", bob_cmd, detach=True)
 
-        self._execute_container_command("bob", bob_cmd, detach=True)
+            print("Running Alice's test script...")
+            alice_cmd = (
+                f"bash -c 'source /set_env.sh && "
+                f"python3 /etc/swanctl/alice_tests.py --iterations {iterations} "
+                f"--output-dir {self.dirs['docker_output_dir']}'"
+            )
+            alice_result = self._execute_container_command(
+                "alice", alice_cmd, stream=True
+            )
+            for output in alice_result.output:
+                print(output.decode().strip())
 
-        # Run Alice's test script
-        print("Running Alice's test script...")
-        alice_cmd = (
-            f"bash -c 'source /set_env.sh && "
-            f"python3 /etc/swanctl/alice_tests.py --iterations {iterations} "
-            f"--output-dir {self.dirs['docker_output_dir']}'"
-        )
+        elif self.role == "alice":
+            # Distributed mode - Alice only
+            print("Running Alice's test script in distributed mode...")
+            print(f"Alice will coordinate with Bob at {self.remote_ip}")
 
-        alice_result = self._execute_container_command("alice", alice_cmd, stream=True)
-        for output in alice_result.output:
-            print(output.decode().strip())
+            # Alice uses a different coordination port (8081) to avoid conflicts
+            alice_coord_port = self.coordination_port + 1
+            print(f"Alice using coordination port: {alice_coord_port}")
+            print(f"Bob should be using coordination port: {self.coordination_port}")
+
+            alice_cmd = (
+                f"bash -c 'source /set_env.sh && "
+                f"python3 /etc/swanctl/alice_tests.py --iterations {iterations} "
+                f"--output-dir {self.dirs['docker_output_dir']} "
+                f"--remote-ip {self.remote_ip} "
+                f"--coordination-port {alice_coord_port} "
+                f"--distributed'"
+            )
+            alice_result = self._execute_container_command(
+                "alice", alice_cmd, stream=True
+            )
+            for output in alice_result.output:
+                print(output.decode().strip())
+
+        elif self.role == "bob":
+            # Distributed mode - Bob coordinates with Alice
+            print(f"Running Bob's test script in distributed mode...")
+            print(f"Bob will coordinate with Alice at {self.remote_ip}")
+            print(f"Bob using coordination port: {self.coordination_port}")
+
+            # Bob needs to signal Alice on Alice's coordination port (8081)
+            alice_coord_port = self.coordination_port + 1
+            print(f"Bob will signal Alice on her coordination port: {alice_coord_port}")
+            print("")
+            print("Bob will:")
+            print("1. Start coordination server on port 8080")
+            print("2. Signal Alice on her port 8081 that he's ready")
+            print("3. Wait for Alice to start test server")
+            print("4. Connect and run synchronized tests")
+            print("")
+
+            # REMOVE OUTPUT REDIRECTION TO SEE BOB'S ACTUAL OUTPUT
+            bob_cmd = (
+                f"bash -c 'export IS_TLS_SERVER=1 && source /set_env.sh && "
+                f"python3 /etc/swanctl/bob_tests.py "
+                f"--alice-ip {self.remote_ip} "
+                f"--coordination-port {self.coordination_port} "
+                f"--alice-coordination-port {alice_coord_port} "
+                f"--distributed'"
+            )
+
+            print("Starting Bob - he will coordinate with Alice...")
+            print(f"DEBUG: Bob command: {bob_cmd}")
+            bob_result = self._execute_container_command("bob", bob_cmd, stream=True)
+
+            print("Bob's output:")
+            for output in bob_result.output:
+                print(output.decode().strip())
 
         print(f"Tests completed. Results accessible in {self.dirs['output_dir']}/")
 
@@ -997,13 +1272,49 @@ class QKDTestOrchestrator:
             print(f"✗ Analysis error: {e}")
 
     def _prompt_container_shutdown(self):
-        """Ask user if they want to stop containers."""
+        """Ask user if they want to stop containers based on role."""
         while True:
             response = input("Stop containers? (y/n): ").strip().lower()
             if response in ("y", "yes"):
                 print("Stopping containers...")
-                compose_file = self.config["docker"]["compose_file"]
-                self._run_docker_command(["docker-compose", "-f", compose_file, "down"])
+
+                if self.role == "alice":
+                    # Only stop Alice-related containers
+                    containers_to_stop = [
+                        "alice",
+                        "qkd_server_alice",
+                        "generate_key_alice",
+                    ]
+                    for container in containers_to_stop:
+                        try:
+                            subprocess.run(
+                                ["docker", "stop", container],
+                                check=False,
+                                capture_output=True,
+                            )
+                            print(f"Stopped {container}")
+                        except:
+                            pass
+                elif self.role == "bob":
+                    # Only stop Bob-related containers
+                    containers_to_stop = ["bob", "qkd_server_bob", "generate_key_bob"]
+                    for container in containers_to_stop:
+                        try:
+                            subprocess.run(
+                                ["docker", "stop", container],
+                                check=False,
+                                capture_output=True,
+                            )
+                            print(f"Stopped {container}")
+                        except:
+                            pass
+                else:
+                    # For "both", stop everything
+                    compose_file = self.compose_file
+                    self._run_docker_command(
+                        ["docker-compose", "-f", compose_file, "down"]
+                    )
+
                 print("Containers stopped.")
                 break
             elif response in ("n", "no"):
@@ -1012,7 +1323,7 @@ class QKDTestOrchestrator:
                 print("Please enter 'y' or 'n'.")
 
     def execute_workflow(self):
-        """Execute the complete testing workflow with proper cleanup."""
+        """Execute the complete testing workflow with proper cleanup and coordination."""
         try:
             # Clean up any existing Pumba containers first
             self._cleanup_all_pumba_containers()
@@ -1030,6 +1341,36 @@ class QKDTestOrchestrator:
                 if not self.check_containers():
                     print("Cannot proceed without running containers.")
                     return 1
+
+            # Special instructions for distributed mode
+            if self.network_mode == "distributed" and self.role in ["alice", "bob"]:
+                print("\n" + "=" * 60)
+                print("DISTRIBUTED MODE COORDINATION")
+                print("=" * 60)
+
+                if self.role == "alice":
+                    print("You are running Alice. Make sure Bob is ready:")
+                    print(
+                        f"1. Bob should run: python benchmark.py --role bob --remote-ip {self.local_ip}"
+                    )
+                    print("2. Bob will start coordination server and signal when ready")
+                    print("3. Alice will wait for Bob's signal before starting tests")
+                    print("4. Tests will run in synchronized fashion")
+
+                elif self.role == "bob":
+                    print("You are running Bob. Coordination sequence:")
+                    print("1. Bob (this instance) will start coordination server")
+                    print("2. Bob will signal Alice that he's ready")
+                    print(
+                        f"3. Alice should then run: python benchmark.py --role alice --remote-ip {self.local_ip}"
+                    )
+                    print("4. Alice will coordinate test execution")
+                    print("5. Tests will run in synchronized fashion")
+
+                print("=" * 60)
+
+                # Give user a moment to read
+                input("Press Enter to continue...")
 
             # Log environment versions, Python packages and network parameters for reproducibility
             print("Logging environment versions for reproducibility...")
@@ -1097,6 +1438,29 @@ def parse_arguments():
         type=str,
         choices=["python_client", "qukaydee", "cerberis-xgr", "simulated"],
         help="QKD backend to use",
+    )
+    parser.add_argument(
+        "--role",
+        type=str,
+        choices=["alice", "bob", "both"],
+        default="both",
+        help="Role to run on this machine (alice, bob, or both for single-machine)",
+    )
+    parser.add_argument(
+        "--remote-ip",
+        type=str,
+        help="IP address of the remote machine (required when role is alice or bob)",
+    )
+    parser.add_argument(
+        "--local-ip",
+        type=str,
+        help="Local IP address to bind to (optional, auto-detected if not specified)",
+    )
+    parser.add_argument(
+        "--coordination-port",
+        type=int,
+        default=8080,
+        help="Port for coordination between Alice and Bob machines (default: 8080)",
     )
     parser.add_argument(
         "--qkd-initiation-mode",

@@ -1,0 +1,197 @@
+services:
+
+  strongswan-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+      args:
+        BUILD_QKD_ETSI: "true"
+        BUILD_QKD_KEM: "true"
+        QKD_BACKEND: ${QKD_BACKEND:-simulated}
+        ACCOUNT_ID: ${ACCOUNT_ID:-}
+        ETSI_API_VERSION: ${ETSI_API_VERSION:-004}
+        QKD_INITIATION_MODE: ${QKD_INITIATION_MODE:-client}
+        STRONGSWAN_VERSION: ${STRONGSWAN_VERSION:-6.0.0beta6}
+    image: strongswan-base:latest
+    container_name: strongswan-base
+    pull_policy: never
+      
+  bob:
+    image: strongswan-base:latest
+    container_name: bob
+    pull_policy: never
+    depends_on:
+      - strongswan-base
+      - qkd_server_bob
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
+      - QKD_BACKEND=${QKD_BACKEND:-python_client}
+      # ETSI 004 URI Configuration
+      - QKD_SOURCE_URI=client://bob:0
+      - QKD_DEST_URI=server://qkd_server_bob:25576
+      # QKD QoS Configuration
+      - QKD_KEY_CHUNK_SIZE=32
+      - QKD_TIMEOUT=60000
+      - QKD_MAX_BPS=40000
+      - QKD_MIN_BPS=5000
+      # Certificate configuration
+      - CLIENT_CERT_PEM=/qkd_certs/etsi004/client_cert_qkd_server_bob.pem
+      - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_bob.pem
+      - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_bob.pem
+      # Distributed mode configuration
+      - REMOTE_ALICE_IP=${REMOTE_ALICE_IP:-192.168.1.100}
+      - LOCAL_IP=${LOCAL_IP:-auto}
+      - COORDINATION_PORT=${COORDINATION_PORT:-8080}
+      - BENCHMARK_ROLE=${BENCHMARK_ROLE:-bob}
+    volumes:
+      - ./bob:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
+      - ./strongswan.conf:/etc/strongswan.conf
+      - ./results:/output
+      - ./qkd_certs:/qkd_certs
+    network_mode: host
+        
+  alice:
+    image: strongswan-base:latest
+    container_name: alice
+    pull_policy: never
+    depends_on:
+      - strongswan-base
+      - qkd_server_alice
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    stdin_open: true
+    tty: true
+    environment:
+      - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
+      - QKD_BACKEND=${QKD_BACKEND:-python_client}
+      # ETSI 004 URI Configuration
+      - QKD_SOURCE_URI=client://alice:0
+      - QKD_DEST_URI=server://qkd_server_alice:25575
+      # QKD QoS Configuration
+      - QKD_KEY_CHUNK_SIZE=32
+      - QKD_TIMEOUT=60000
+      - QKD_MAX_BPS=40000
+      - QKD_MIN_BPS=5000
+      # Certificate configuration
+      - CLIENT_CERT_PEM=/qkd_certs/etsi004/client_cert_qkd_server_alice.pem
+      - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_alice.pem
+      - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_alice.pem
+      # Distributed mode configuration
+      - REMOTE_BOB_IP=${REMOTE_BOB_IP:-192.168.1.101}
+      - LOCAL_IP=${LOCAL_IP:-auto}
+      - COORDINATION_PORT=${COORDINATION_PORT:-8080}
+      - BENCHMARK_ROLE=${BENCHMARK_ROLE:-alice}
+    volumes:
+      - ./alice:/etc/swanctl
+      - ./config/shared:/etc/swanctl/shared
+      - ./strongswan.conf:/etc/strongswan.conf
+      - ./benchmark_utils:/etc/swanctl/benchmark_utils
+      - ./results:/output
+      - ./qkd_certs:/qkd_certs
+    network_mode: host
+
+  # QKD Servers
+  qkd_server_alice:
+    build:
+      context: ./etsi-qkd-004/server
+    container_name: qkd_server_alice
+    pull_policy: never
+    environment:
+      - SERVER_CERT_PEM=/certs/server_cert_qkd_server_alice.pem
+      - SERVER_CERT_KEY=/certs/server_key_qkd_server_alice.pem
+      - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_alice.pem
+      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_PORT=25575
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_SIZE=1000000
+      - QOS_KEY_CHUNK_SIZE=32
+      - QOS_MAX_BPS=40000
+      - QOS_MIN_BPS=5000
+      - QOS_JITTER=10
+      - QOS_PRIORITY=0
+      - QOS_TIMEOUT=5000
+      - QOS_TTL=3600
+    volumes:
+      - ./qkd_certs/etsi004:/certs
+      - qkd_shared_alice:/dev/shm
+    network_mode: host
+
+  qkd_server_bob:
+    build:
+      context: ./etsi-qkd-004/server
+    container_name: qkd_server_bob
+    pull_policy: never
+    environment:
+      - SERVER_CERT_PEM=/certs/server_cert_qkd_server_bob.pem
+      - SERVER_CERT_KEY=/certs/server_key_qkd_server_bob.pem
+      - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_bob.pem
+      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_PORT=25576
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_SIZE=1000000
+      - QOS_KEY_CHUNK_SIZE=32
+      - QOS_MAX_BPS=40000
+      - QOS_MIN_BPS=5000
+      - QOS_JITTER=10
+      - QOS_PRIORITY=0
+      - QOS_TIMEOUT=5000
+      - QOS_TTL=3600
+    volumes:
+      - ./qkd_certs/etsi004:/certs
+      - qkd_shared_bob:/dev/shm
+    network_mode: host
+
+  generate_key_alice:
+    build:
+      context: ./etsi-qkd-004/keys
+    container_name: generate_key_alice
+    pull_policy: never
+    depends_on:
+      - qkd_server_alice
+    environment:
+      - BUFFER_SIZE=1000000
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - MODE=sender
+      - HOST=${REMOTE_BOB_IP:-192.168.1.101}
+      - PORT=5000
+      - SKR=12500
+    volumes:
+      - qkd_shared_alice:/dev/shm
+    network_mode: host
+
+  generate_key_bob:
+    build:
+      context: ./etsi-qkd-004/keys
+    container_name: generate_key_bob
+    pull_policy: never
+    depends_on:
+      - qkd_server_bob
+    environment:
+      - BUFFER_SIZE=1000000
+      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - MODE=receiver
+      - PORT=5000
+      - SKR=12500
+    volumes:
+      - qkd_shared_bob:/dev/shm
+    network_mode: host
+
+volumes:
+  qkd_shared_alice:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  qkd_shared_bob:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs

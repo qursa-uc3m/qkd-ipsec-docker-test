@@ -11,36 +11,45 @@ docker:
 
   # QKD backend configuration
   qkd:
-    etsi_api_version: "014"  # Options: "004", "014"
-    backend: "qukaydee"  # Options: "simulated", "qukaydee", "cerberis-xgr", "python_client"
+    etsi_api_version: "004"  # Options: "004", "014"
+    backend: "python_client"  # Options: "simulated", "qukaydee", "cerberis-xgr", "python_client"
     account_id: "2509"  # Required for QuKayDee only
-    initiation_mode: "server"  # Options: "client", "server"
+    initiation_mode: "client"  # Options: "client", "server"
 
-  # Docker Compose file to use
-  compose_file: "docker-compose.yml"  # For ETSI 004, use: "docker-compose.004.yml"
+  # Docker Compose files for different modes
+  compose_files:
+    single_machine: "docker-compose.004.yml"
+    distributed: "docker-compose.004.distr.yml"
 
   network:
-    alice_ip: "172.30.0.3"
-    bob_ip: "172.30.0.2"
+    mode: "distributed"  # Options: "single-machine", "distributed"
+    alice:
+      local_ip: "auto"     # Auto-detect or specify
+      container_ip: "172.30.0.3"
+      qkd_server_port: 25575
+    bob:
+      local_ip: "auto"     # Auto-detect or specify  
+      container_ip: "172.30.0.2"
+      qkd_server_port: 25576
+    coordination_port: 8080
 
 # Test parameters
 test:
   # Default network conditions
   network:
-    apply: false
-    latency: 100             # Milliseconds
-    jitter: 0                # Milliseconds
-    packet_loss: 5           # Percentage
-    duration: "180m"          # Duration string
+    apply: true
+    latency: 0             # Milliseconds
+    jitter: 0              # Milliseconds
+    packet_loss: 10        # Percentage
+    duration: "180m"       # Duration string
 
   # Test iterations
-  iterations: 10
-  
+  iterations: 5
+
   # Analysis options
   analyze_results: true
-  log_scale: false            # Use logarithmic scale for charts
+  log_scale: false       # Use logarithmic scale for charts
 
-# Proposal configuration (This will be loaded from proposals_config.yml)
-# This section is just for documentation, actual proposals are loaded separately
+# Proposal configuration
 proposals:
   file: "config/shared/proposals_config.yml"
