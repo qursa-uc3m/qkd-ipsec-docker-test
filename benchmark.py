@@ -762,23 +762,19 @@ class QKDTestOrchestrator:
         """Start Docker containers with role-specific profiles."""
         print("Starting containers...")
 
-        # Base command
-        up_cmd = ["docker-compose", "-f", compose_file, "up", "-d"]
-
+        # Base command with profile support
+        up_cmd = ["docker-compose", "-f", compose_file]
+        
         # Add profile-specific services based on role
         if self.role == "alice":
-            up_cmd.extend(
-                ["strongswan-base", "alice", "qkd_server_alice", "generate_key_alice"]
-            )
+            up_cmd.extend(["--profile", "alice", "up", "-d"])
             print("Starting Alice-related containers only...")
         elif self.role == "bob":
-            up_cmd.extend(
-                ["strongswan-base", "bob", "qkd_server_bob", "generate_key_bob"]
-            )
+            up_cmd.extend(["--profile", "bob", "up", "-d"])
             print("Starting Bob-related containers only...")
         else:  # both
+            up_cmd.extend(["--profile", "alice", "--profile", "bob", "up", "-d"])
             print("Starting all containers...")
-            # For 'both', start all services (default behavior)
 
         try:
             self._run_docker_command(up_cmd, env=env)

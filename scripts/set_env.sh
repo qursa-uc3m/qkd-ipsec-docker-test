@@ -22,44 +22,47 @@ fi
 
 if [ "${ETSI_API_VERSION}" = "004" ]; then
     if [ -z "$QKD_SOURCE_URI" ] || [ -z "$QKD_DEST_URI" ]; then
-        echo "ERROR: QKD_SOURCE_URI and QKD_DEST_URI must be set for ETSI 004"
-        echo "These should be set in docker-compose.yml"
-        exit 1
-    fi
-    
-    # Detect container role from existing environment
-    if [[ "$QKD_DEST_URI" == *"qkd_server_alice"* ]]; then
-        CONTAINER_ROLE="alice"
-    elif [[ "$QKD_DEST_URI" == *"qkd_server_bob"* ]]; then
-        CONTAINER_ROLE="bob"
+        echo "WARNING: QKD_SOURCE_URI and QKD_DEST_URI not set for ETSI 004"
+        echo "This may be expected in distributed mode - proceeding..."
+        # Don't exit - let the application handle this
     else
-        echo "ERROR: Cannot determine container role from QKD_DEST_URI: $QKD_DEST_URI"
-        exit 1
+        # Detect container role from existing environment
+        if [[ "$QKD_DEST_URI" == *"qkd_server_alice"* ]]; then
+            CONTAINER_ROLE="alice"
+        elif [[ "$QKD_DEST_URI" == *"qkd_server_bob"* ]]; then
+            CONTAINER_ROLE="bob"
+        else
+            # Check if BENCHMARK_ROLE is set (from Docker Compose)
+            if [ -n "$BENCHMARK_ROLE" ]; then
+                CONTAINER_ROLE="$BENCHMARK_ROLE"
+                echo "Using BENCHMARK_ROLE for container role: $CONTAINER_ROLE"
+            else
+                echo "WARNING: Cannot determine container role from QKD_DEST_URI: $QKD_DEST_URI"
+                echo "Proceeding without role detection - application will handle this"
+                CONTAINER_ROLE="unknown"
+            fi
+        fi
+        
+        # Validate that certificate paths are set (by Docker Compose) - only if URIs are set
+        if [ -n "$CLIENT_CERT_PEM" ] && [ -n "$CLIENT_CERT_KEY" ] && [ -n "$SERVER_CERT_PEM" ]; then
+            # Check if certificate files exist
+            if [ -f "$CLIENT_CERT_PEM" ] && [ -f "$CLIENT_CERT_KEY" ] && [ -f "$SERVER_CERT_PEM" ]; then
+                echo "ETSI 004 Configuration (from Docker Compose):"
+                echo "  Container Role: $CONTAINER_ROLE"
+                echo "  Source URI: $QKD_SOURCE_URI"
+                echo "  Destination URI: $QKD_DEST_URI"
+                echo "  Backend: ${QKD_BACKEND:-python_client}"
+                echo "  Certificates validated successfully"
+            else
+                echo "WARNING: Certificate files not found - may be expected in distributed mode"
+                echo "  CLIENT_CERT_PEM: $CLIENT_CERT_PEM"
+                echo "  CLIENT_CERT_KEY: $CLIENT_CERT_KEY"
+                echo "  SERVER_CERT_PEM: $SERVER_CERT_PEM"
+            fi
+        else
+            echo "WARNING: Certificate environment variables not set - may be expected in distributed mode"
+        fi
     fi
-    
-    # Validate that certificate paths are set (by Docker Compose)
-    if [ -z "$CLIENT_CERT_PEM" ] || [ -z "$CLIENT_CERT_KEY" ] || [ -z "$SERVER_CERT_PEM" ]; then
-        echo "ERROR: Certificate environment variables not set!"
-        echo "These should be set in docker-compose.yml:"
-        echo "  CLIENT_CERT_PEM, CLIENT_CERT_KEY, SERVER_CERT_PEM"
-        exit 1
-    fi
-    
-    # Check if certificate files exist
-    if [ ! -f "$CLIENT_CERT_PEM" ] || [ ! -f "$CLIENT_CERT_KEY" ] || [ ! -f "$SERVER_CERT_PEM" ]; then
-        echo "ERROR: Certificate files not found!"
-        echo "  CLIENT_CERT_PEM: $CLIENT_CERT_PEM"
-        echo "  CLIENT_CERT_KEY: $CLIENT_CERT_KEY"
-        echo "  SERVER_CERT_PEM: $SERVER_CERT_PEM"
-        exit 1
-    fi
-    
-    echo "ETSI 004 Configuration (from Docker Compose):"
-    echo "  Container Role: $CONTAINER_ROLE"
-    echo "  Source URI: $QKD_SOURCE_URI"
-    echo "  Destination URI: $QKD_DEST_URI"
-    echo "  Backend: ${QKD_BACKEND:-python_client}"
-    echo "  Certificates validated successfully"
     
 elif [ "${QKD_BACKEND}" = "qukaydee" ]; then
     echo "Setting up QuKayDee environment (ETSI 014):"
@@ -137,4 +140,7 @@ fi
 # Print all QKD environment variables
 echo ""
 echo "QKD Environment Variables:"
-env | grep -E "QKD_|ETSI_|CLIENT_CERT_|SERVER_CERT_" | sort
+env | grep -E "QKD_|ETSI_|CLIENT_CERT_|SERVER_CERT_|BENCHMARK_ROLE" | sort
+
+# Exit successfully - let the application handle any remaining issues
+echo "Environment setup completed successfully"

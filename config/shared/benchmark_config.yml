@@ -22,7 +22,7 @@ docker:
     distributed: "docker-compose.004.distr.yml"
 
   network:
-    mode: "distributed"  # Options: "single-machine", "distributed"
+    mode: "single-machine"  # Options: "single-machine", "distributed"
     alice:
       local_ip: "auto"     # Auto-detect or specify
       container_ip: "172.30.0.3"

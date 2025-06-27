@@ -1,5 +1,6 @@
 services:
 
+  # Base image - no profile so it's always available
   strongswan-base:
     build:
       context: .
@@ -14,15 +15,15 @@ services:
         QKD_INITIATION_MODE: ${QKD_INITIATION_MODE:-client}
         STRONGSWAN_VERSION: ${STRONGSWAN_VERSION:-6.0.0beta6}
     image: strongswan-base:latest
-    container_name: strongswan-base
     pull_policy: never
+    # No container_name and no profiles - just builds the image
       
   bob:
     image: strongswan-base:latest
     container_name: bob
     pull_policy: never
     depends_on:
-      - strongswan-base
+      - strongswan-base  # Explicit dependency on base image build
       - qkd_server_bob
     cap_add:
       - NET_ADMIN
@@ -33,7 +34,7 @@ services:
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
       - QKD_BACKEND=${QKD_BACKEND:-python_client}
-      # ETSI 004 URI Configuration
+      # ETSI 004 URI Configuration - keep container names for internal resolution
       - QKD_SOURCE_URI=client://bob:0
       - QKD_DEST_URI=server://qkd_server_bob:25576
       # QKD QoS Configuration
@@ -46,10 +47,13 @@ services:
       - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_bob.pem
       - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_bob.pem
       # Distributed mode configuration
-      - REMOTE_ALICE_IP=${REMOTE_ALICE_IP:-192.168.1.100}
-      - LOCAL_IP=${LOCAL_IP:-auto}
+      - REMOTE_ALICE_IP=${REMOTE_ALICE_IP:-127.0.0.3}
+      - LOCAL_IP=${LOCAL_IP:-127.0.0.2}
       - COORDINATION_PORT=${COORDINATION_PORT:-8080}
-      - BENCHMARK_ROLE=${BENCHMARK_ROLE:-bob}
+      - BENCHMARK_ROLE=bob  # Explicit role
+      # StrongSwan specific ports for Bob
+      - STRONGSWAN_IKE_PORT=500
+      - STRONGSWAN_NATT_PORT=4500
     volumes:
       - ./bob:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -57,13 +61,15 @@ services:
       - ./results:/output
       - ./qkd_certs:/qkd_certs
     network_mode: host
+    profiles:
+      - bob
         
   alice:
     image: strongswan-base:latest
     container_name: alice
     pull_policy: never
     depends_on:
-      - strongswan-base
+      - strongswan-base  # Explicit dependency on base image build
       - qkd_server_alice
     cap_add:
       - NET_ADMIN
@@ -74,7 +80,7 @@ services:
     environment:
       - ETSI_API_VERSION=${ETSI_API_VERSION:-004}
       - QKD_BACKEND=${QKD_BACKEND:-python_client}
-      # ETSI 004 URI Configuration
+      # ETSI 004 URI Configuration - keep container names for internal resolution
       - QKD_SOURCE_URI=client://alice:0
       - QKD_DEST_URI=server://qkd_server_alice:25575
       # QKD QoS Configuration
@@ -87,10 +93,13 @@ services:
       - CLIENT_CERT_KEY=/qkd_certs/etsi004/client_key_qkd_server_alice.pem
       - SERVER_CERT_PEM=/qkd_certs/etsi004/server_cert_qkd_server_alice.pem
       # Distributed mode configuration
-      - REMOTE_BOB_IP=${REMOTE_BOB_IP:-192.168.1.101}
-      - LOCAL_IP=${LOCAL_IP:-auto}
-      - COORDINATION_PORT=${COORDINATION_PORT:-8080}
-      - BENCHMARK_ROLE=${BENCHMARK_ROLE:-alice}
+      - REMOTE_BOB_IP=${REMOTE_BOB_IP:-127.0.0.2}
+      - LOCAL_IP=${LOCAL_IP:-127.0.0.3}
+      - COORDINATION_PORT=${COORDINATION_PORT:-8081}  # Different port for Alice
+      - BENCHMARK_ROLE=alice  # Explicit role
+      # StrongSwan specific ports for Alice (different from Bob)
+      - STRONGSWAN_IKE_PORT=501   # Different IKE port
+      - STRONGSWAN_NATT_PORT=4501 # Different NAT-T port
     volumes:
       - ./alice:/etc/swanctl
       - ./config/shared:/etc/swanctl/shared
@@ -99,8 +108,10 @@ services:
       - ./results:/output
       - ./qkd_certs:/qkd_certs
     network_mode: host
+    profiles:
+      - alice
 
-  # QKD Servers
+  # QKD Servers - bind to specific loopback IPs
   qkd_server_alice:
     build:
       context: ./etsi-qkd-004/server
@@ -110,9 +121,9 @@ services:
       - SERVER_CERT_PEM=/certs/server_cert_qkd_server_alice.pem
       - SERVER_CERT_KEY=/certs/server_key_qkd_server_alice.pem
       - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_alice.pem
-      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_ADDRESS=127.0.0.3  # Bind to Alice's loopback IP
       - SERVER_PORT=25575
-      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_PATH=/dev/shm/qkd_buffer_alice  # Separate buffer paths
       - BUFFER_SIZE=1000000
       - QOS_KEY_CHUNK_SIZE=32
       - QOS_MAX_BPS=40000
@@ -125,6 +136,8 @@ services:
       - ./qkd_certs/etsi004:/certs
       - qkd_shared_alice:/dev/shm
     network_mode: host
+    profiles:
+      - alice
 
   qkd_server_bob:
     build:
@@ -135,9 +148,9 @@ services:
       - SERVER_CERT_PEM=/certs/server_cert_qkd_server_bob.pem
       - SERVER_CERT_KEY=/certs/server_key_qkd_server_bob.pem
       - CLIENT_CERT_PEM=/certs/client_cert_qkd_server_bob.pem
-      - SERVER_ADDRESS=0.0.0.0
+      - SERVER_ADDRESS=127.0.0.2  # Bind to Bob's loopback IP
       - SERVER_PORT=25576
-      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_PATH=/dev/shm/qkd_buffer_bob    # Separate buffer paths
       - BUFFER_SIZE=1000000
       - QOS_KEY_CHUNK_SIZE=32
       - QOS_MAX_BPS=40000
@@ -150,6 +163,8 @@ services:
       - ./qkd_certs/etsi004:/certs
       - qkd_shared_bob:/dev/shm
     network_mode: host
+    profiles:
+      - bob
 
   generate_key_alice:
     build:
@@ -160,14 +175,16 @@ services:
       - qkd_server_alice
     environment:
       - BUFFER_SIZE=1000000
-      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_PATH=/dev/shm/qkd_buffer_alice  # Match Alice's buffer path
       - MODE=sender
-      - HOST=${REMOTE_BOB_IP:-192.168.1.101}
+      - HOST=127.0.0.2  # Connect to Bob's IP
       - PORT=5000
       - SKR=12500
     volumes:
       - qkd_shared_alice:/dev/shm
     network_mode: host
+    profiles:
+      - alice
 
   generate_key_bob:
     build:
@@ -178,13 +195,15 @@ services:
       - qkd_server_bob
     environment:
       - BUFFER_SIZE=1000000
-      - BUFFER_PATH=/dev/shm/qkd_buffer
+      - BUFFER_PATH=/dev/shm/qkd_buffer_bob    # Match Bob's buffer path
       - MODE=receiver
       - PORT=5000
       - SKR=12500
     volumes:
       - qkd_shared_bob:/dev/shm
     network_mode: host
+    profiles:
+      - bob
 
 volumes:
   qkd_shared_alice:
