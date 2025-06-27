@@ -104,7 +104,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install required Python packages
-RUN pip3 install pandas pyyaml
+RUN pip3 install pandas pyyaml requests
 
 # Create directory for output
 RUN mkdir -p /output
