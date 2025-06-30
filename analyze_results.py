@@ -328,7 +328,7 @@ def plot_network_conditions_comparison(
     ax.legend(
         by_label.values(),
         by_label.keys(),
-        loc="upper right",
+        loc="best",
         fontsize=10,
         framealpha=0.9,
     )
