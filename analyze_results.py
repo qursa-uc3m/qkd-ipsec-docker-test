@@ -578,26 +578,30 @@ def load_network_condition_data(result_dirs):
     proposal_order = None  # Will store the first encountered proposal order
 
     for result_dir in result_dirs:
-        # Extract network condition from directory name
-        dir_name = os.path.basename(result_dir)
+        # Extract network condition from directory path
+        path_parts = result_dir.rstrip("/").split("/")
 
-        # Parse network condition from directory name
-        if dir_name.startswith("no_network_conditions"):
-            condition_label = "No Network Conditions"
-        else:
-            # Extract lat, jit, loss values from directory name
-            parts = dir_name.split("_")
-            lat = jit = loss = "0"
+        # Find the network condition part in the path
+        condition_label = "Unknown"
+        for part in path_parts:
+            if part.startswith("no_network_conditions"):
+                condition_label = "No Network Conditions"
+                break
+            elif part.startswith("lat") and ("_jit" in part or "_loss" in part):
+                # Extract lat, jit, loss values from directory name like "lat10_jit0_loss0"
+                parts = part.split("_")
+                lat = jit = loss = "0"
 
-            for part in parts:
-                if part.startswith("lat"):
-                    lat = part[3:]
-                elif part.startswith("jit"):
-                    jit = part[3:]
-                elif part.startswith("loss"):
-                    loss = part[4:]
+                for subpart in parts:
+                    if subpart.startswith("lat"):
+                        lat = subpart[3:]
+                    elif subpart.startswith("jit"):
+                        jit = subpart[3:]
+                    elif subpart.startswith("loss"):
+                        loss = subpart[4:]
 
-            condition_label = f"Lat:{lat}ms Jit:{jit}ms Loss:{loss}%"
+                condition_label = f"Lat:{lat}ms Jit:{jit}ms Loss:{loss}%"
+                break
 
         network_conditions.append(condition_label)
 
