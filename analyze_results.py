@@ -223,13 +223,13 @@ def plot_boxplot_with_scatter(
 
     # Customize plot
     ax.set_xticks(positions)
-    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
     ax.tick_params(axis="y", labelsize=11)
 
     # Set labels and title
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
-    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
+    ax.set_ylabel(ylabel, fontweight="bold", labelpad=20)
+    ax.set_title(title, fontweight="bold", pad=20)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -314,13 +314,13 @@ def plot_network_conditions_comparison(
 
     # Set x-axis
     ax.set_xticks([i * 1.0 for i in range(n_proposals)])
-    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
-    ax.tick_params(axis="y", labelsize=11)
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
+    ax.tick_params(axis="y")
 
     # Set labels and title
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
-    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
+    ax.set_ylabel(ylabel, fontweight="bold", labelpad=20)
+    ax.set_title(title, fontweight="bold", pad=20)
 
     # Add legend
     handles, labels = ax.get_legend_handles_labels()
@@ -329,7 +329,6 @@ def plot_network_conditions_comparison(
         by_label.values(),
         by_label.keys(),
         loc="best",
-        fontsize=10,
         framealpha=0.9,
     )
 
@@ -399,11 +398,11 @@ def create_timing_bar_chart(
     )
 
     # Customize plot
-    ax.set_title(title, fontweight="bold", fontsize=16, pad=20)
-    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_title(title, fontweight="bold", pad=20)
+    ax.set_ylabel(ylabel, fontweight="bold", labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
     ax.set_xticks(x)
-    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right", fontsize=11)
+    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right")
     ax.tick_params(axis="y", labelsize=11)
 
     # Add value annotations on bars
@@ -426,7 +425,6 @@ def create_timing_bar_chart(
             f"{mean:.2f}±{std:.2f}",
             ha="center",
             va="bottom",
-            fontsize=10,
             fontweight="bold",
         )
 
@@ -472,16 +470,13 @@ def create_comparison_chart(stats_df, output_path, color_palette=None):
     ax.set_title(
         "Plugin Overhead: Difference Between Total Time and Active Plugin Time",
         fontweight="bold",
-        fontsize=16,
         pad=20,
     )
-    ax.set_ylabel(
-        "Overhead (milliseconds)", fontweight="bold", fontsize=12, labelpad=20
-    )
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_ylabel("Overhead (milliseconds)", fontweight="bold", labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
     ax.set_xticks(x)
-    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right", fontsize=11)
-    ax.tick_params(axis="y", labelsize=11)
+    ax.set_xticklabels(stats_df["proposal"], rotation=45, ha="right")
+    ax.tick_params(axis="y")
 
     # Add value annotations on bars with percentage
     for i, (bar, overhead_ms, overhead_pct) in enumerate(
@@ -502,7 +497,6 @@ def create_comparison_chart(stats_df, output_path, color_palette=None):
             f"{overhead_ms:.2f} ms\n({overhead_pct:.1f}%)",
             ha="center",
             va=va,
-            fontsize=10,
             fontweight="bold",
         )
 
@@ -933,7 +927,6 @@ def plot_ike_bytes_by_exchange(df_bytes, output_path, color_palette=None):
                     label_text,
                     ha="center",
                     va="bottom",
-                    fontsize=12,
                     fontweight="bold",
                     rotation=(90),
                 )
@@ -1189,19 +1182,18 @@ def plot_bytes_increase_comparison(comparison_df, output_path, color_palette=Non
     ax.set_title(
         "Bytes Transmission Increase by Proposal\n(Comparison vs Baseline)",
         fontweight="bold",
-        fontsize=16,
         pad=20,
     )
-    ax.set_ylabel("Bytes Increase", fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_ylabel("Bytes Increase", fontweight="bold", labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
 
     # Set x-axis
     ax.set_xticks(x)
-    ax.set_xticklabels(proposals, rotation=45, ha="right", fontsize=11)
-    ax.tick_params(axis="y", labelsize=11)
+    ax.set_xticklabels(proposals, rotation=45, ha="right")
+    ax.tick_params(axis="y")
 
     # Add legend
-    ax.legend(loc="upper right", fontsize=11, framealpha=0.9)
+    ax.legend(loc="upper right", framealpha=0.9)
 
     # Format y-axis to show values with commas
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{int(x):,}"))
@@ -1460,11 +1452,10 @@ def plot_timing_comparison(
     ax.set_title(
         r"Network Communication Time vs Plugin Processing Overhead",
         fontweight="bold",
-        fontsize=14,
         pad=20,
     )
-    ax.set_ylabel(ylabel, fontweight="bold", fontsize=12, labelpad=20)
-    ax.set_xlabel("Proposal", fontweight="bold", fontsize=12)
+    ax.set_ylabel(ylabel, fontweight="bold", labelpad=20)
+    ax.set_xlabel("Proposal", fontweight="bold")
 
     # Set x-axis
     ax.set_xticks(x_positions)
